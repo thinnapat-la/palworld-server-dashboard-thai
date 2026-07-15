@@ -1,6 +1,9 @@
-MIT License
+Custom License & Non-Commercial Amendment
 
-Copyright (c) 2026 thinnapat-la
+This project consists of modified software based on "thijsvanloef/palworld-server-docker" (originally licensed under the MIT License). 
+
+1. ORIGINAL WORK (MIT LICENSE)
+--------------------------------------------------------------------------------
 Copyright (c) 2024 Thijs van Loef
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
@@ -20,3 +23,23 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
+
+2. CUSTOM MODIFICATIONS & THAI TRANSLATIONS (NON-COMMERCIAL LICENSE)
+--------------------------------------------------------------------------------
+Copyright (c) 2026 thinnapat-la (palworld-server-docker-thai)
+
+For all modifications, configurations, scripts, and localization assets added 
+in this repository by thinnapat-la:
+
+[EN] TERMS AND CONDITIONS FOR USE, REPRODUCTION, AND DISTRIBUTION:
+- Commercial use is strictly prohibited. You may not use this software, or any 
+  derivative works, for commercial purposes, profitable server hosting, or resale.
+- Modification and Distribution for private, educational, or non-commercial 
+  community purposes are permitted, provided that this license and all copyright 
+  notices remain intact.
+
+[TH] ข้อกำหนดและเงื่อนไขการใช้งาน:
+- ห้ามนำส่วนที่ดัดแปลงและเพิ่มเติมในโปรเจกต์นี้ไปใช้ในเชิงพาณิชย์โดยเด็ดขาด 
+  (รวมถึงการนำไปเปิดเซิร์ฟเวอร์เกมเพื่อแสวงหาผลกำไร เก็บค่าบริการ หรือนำไปขายต่อ)
+- อนุญาตให้ดัดแปลงและแจกจ่ายต่อเพื่อการใช้งานส่วนตัว การศึกษา หรือภายในชุมชนที่ไม่มีการแสวงหาผลกำไรเท่านั้น 
+  โดยต้องคงเอกสารสิทธิ์และประกาศลิขสิทธิ์นี้ไว้ห้ามลบทำลาย
