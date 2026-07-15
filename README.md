@@ -306,7 +306,7 @@ Culture=th
 
 อ่านรายละเอียดทุกเมนู ทุกขั้นตอนการกู้คืน ตัวแปรทั้งหมด และ Troubleshooting ได้ที่:
 
-- [`FULL_GUIDE_TH.md`](FULL_GUIDE_TH.md): คู่มือฉบับเต็ม การติดตั้ง ทุกเมนู GameData API Security และ Troubleshooting
+- [`FULL-GUIDE-TH.md`](FULL-GUIDE-TH.md): คู่มือฉบับเต็ม การติดตั้ง ทุกเมนู GameData API Security และ Troubleshooting
 - [`DASHBOARD-MAINTENANCE.md`](DASHBOARD-MAINTENANCE.md): คู่มือ Dashboard
 
 ## แหล่งอ้างอิงหลัก

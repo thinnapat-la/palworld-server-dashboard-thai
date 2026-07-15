@@ -161,7 +161,7 @@ Snapshot ไม่ใช่ Backup และอาจมี JSON ขนาดใ
 ## เอกสารเพิ่มเติม
 
 - [`README.md`](README.md): ภาพรวมและ Quick start
-- [`FULL_GUIDE_TH.md`](FULL_GUIDE_TH.md): คู่มือฉบับเต็ม การติดตั้ง ทุกเมนู GameData API Security และ Troubleshooting
+- [`FULL-GUIDE-TH.md`](FULL-GUIDE-TH.md): คู่มือฉบับเต็ม การติดตั้ง ทุกเมนู GameData API Security และ Troubleshooting
 
 ---
 
