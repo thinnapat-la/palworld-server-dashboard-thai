@@ -1,0 +1,365 @@
+# Palworld Dedicated Server - Docker Compose พร้อมค่าตัวอย่างและคำอธิบายภาษาไทย
+# Discord invite ของชุมชน: https://discord.gg/B9wUtyg9s
+# หมายเหตุ: ลิงก์ discord.gg เป็น Invite Link ไม่ใช่ Webhook URL และใช้ส่งข้อความจากคอนเทนเนอร์ไม่ได้
+# ให้สร้าง Webhook ใน Discord: Edit Channel > Integrations > Webhooks > New Webhook > Copy Webhook URL
+# แนะนำให้เก็บรหัสผ่านและ Webhook URL ไว้ในไฟล์ .env หรือ Docker Secret หากเปิดเผย Compose ให้ผู้อื่น
+#
+services:
+  palworld:
+    image: thijsvanloef/palworld-server-docker:latest # อิมเมจ Palworld Server รุ่นล่าสุด
+    container_name: palworld-server # ชื่อคอนเทนเนอร์สำหรับใช้อ้างอิงในคำสั่ง Docker
+    restart: unless-stopped # ให้คอนเทนเนอร์เริ่มใหม่อัตโนมัติยกเว้นสั่งหยุดเอง
+    stop_grace_period: 30s # เวลารอให้เซิร์ฟเวอร์บันทึกข้อมูลและปิดอย่างปลอดภัย
+
+    healthcheck:
+      test: ["CMD-SHELL", "pgrep -f PalServer-Linux-Test >/dev/null || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 5m
+
+    # ==================== พอร์ตที่เปิดใช้งาน ====================
+    ports:
+      - "8211:8211/udp" # พอร์ตหลักสำหรับผู้เล่นเชื่อมต่อเกม
+      - "27015:27015/udp" # พอร์ต Query สำหรับ Steam และ Community Server
+      - "25575:25575/tcp" # พอร์ต RCON ควรเปิดเฉพาะใน LAN หรือผ่าน Firewall
+      - "127.0.0.1:8212:8212/tcp" # พอร์ต REST API ผูกเฉพาะ localhost ห้าม Forward ออกอินเทอร์เน็ต
+
+    # ==================== ที่เก็บข้อมูลถาวร ====================
+    volumes:
+      - ./palworld:/palworld/ # เก็บไฟล์เกม เซฟ Config และ Backup ไว้ข้างเครื่อง Host
+
+    environment:
+      # ==================== ระบบพื้นฐานและสิทธิ์ไฟล์ ====================
+      TZ: "Asia/Bangkok" # เขตเวลาที่ใช้กับ Log Backup Update และ Reboot
+      PUID: "1000" # UID ของผู้ใช้บน Host ที่ให้เป็นเจ้าของไฟล์ ห้ามใช้ 0
+      PGID: "1000" # GID ของกลุ่มบน Host ที่ให้เป็นเจ้าของไฟล์ ห้ามใช้ 0
+      UPDATE_ON_BOOT: "true" # ติดตั้งหรืออัปเดตเซิร์ฟเวอร์เมื่อเริ่มคอนเทนเนอร์ ต้องเปิดครั้งแรก
+      MULTITHREADING: "true" # เปิดโหมดประมวลผลหลายเธรด เหมาะกับ CPU ตั้งแต่ประมาณ 4 เธรด
+      USE_DEPOT_DOWNLOADER: "false" # ใช้ DepotDownloader แทน SteamCMD เหมาะกับเครื่องที่ SteamCMD ไม่รองรับ
+      INSTALL_BETA_INSIDER: "false" # ติดตั้ง Palworld Dedicated Server รุ่น Beta Insider
+      TARGET_MANIFEST_ID: "" # ล็อกเวอร์ชันเกมด้วย Steam Manifest ID เว้นว่างเพื่อใช้รุ่นล่าสุด
+      STEAM_USERNAME: "" # ชื่อผู้ใช้ Steam สำหรับโหลด Manifest เฉพาะรุ่น
+      STEAM_PASSWORD: "" # รหัสผ่าน Steam สำหรับโหลด Manifest เฉพาะรุ่น
+
+      # ==================== ข้อมูลและการเชื่อมต่อเซิร์ฟเวอร์ ====================
+      SERVER_NAME: "Mien Palworld Thailand" # ชื่อตัวอย่างที่แสดงในรายการเซิร์ฟเวอร์; เปลี่ยนได้ตามชื่อชุมชน # ชื่อเซิร์ฟเวอร์ที่ผู้เล่นมองเห็น
+      SERVER_DESCRIPTION: "เซิร์ฟเวอร์ Palworld ไทย | Discord: https://discord.gg/B9wUtyg9s" # คำอธิบายตัวอย่างพร้อม Invite Link สำหรับผู้เล่น # คำอธิบายเซิร์ฟเวอร์
+      SERVER_PASSWORD: "${PALWORLD_SERVER_PASSWORD:-CHANGE_ME_NOW}" # รหัสเข้าห้อง; ตัวอย่าง Pw-Thailand-2026 และควรใส่จริงในไฟล์ .env # รหัสผ่านสำหรับผู้เล่น ควรเปลี่ยนก่อนเปิดใช้งาน
+      ADMIN_PASSWORD: "${PALWORLD_ADMIN_PASSWORD:-CHANGE_ME_ADMIN_NOW}" # รหัสผู้ดูแล RCON/REST; ควรยาวอย่างน้อย 16 ตัวและไม่ซ้ำรหัสผู้เล่น # รหัสผ่านผู้ดูแล RCON และ REST API ต้องตั้งให้เดายาก
+      PLAYERS: "16" # ตัวอย่างรองรับ 16 คน; ช่วง 1-32 และควรลดลงหาก RAM ต่ำกว่า 32GB
+      PORT: "8211" # พอร์ต UDP หลักของเกมภายในคอนเทนเนอร์
+      QUERY_PORT: "27015" # พอร์ต UDP สำหรับ Query และการค้นหาเซิร์ฟเวอร์
+      PUBLIC_IP: "" # Public IP ของเซิร์ฟเวอร์ เว้นว่างเพื่อให้ระบบตรวจหาอัตโนมัติ
+      PUBLIC_PORT: "8211" # พอร์ตสาธารณะที่ผู้เล่นใช้เชื่อมต่อจากอินเทอร์เน็ต
+      COMMUNITY: "true" # true=แสดงใน Community Browser; ตั้งรหัสผ่านไว้แล้วเพื่อจำกัดผู้เล่น
+      CROSSPLAY_PLATFORMS: "(Steam,Xbox,PS5,Mac)" # แพลตฟอร์มที่อนุญาตให้เชื่อมต่อ ต้องมีวงเล็บครอบ
+      ALLOW_CONNECT_PLATFORM: "Steam" # ค่ารุ่นเก่าสำหรับ Steam หรือ Xbox ปัจจุบันเลิกแนะนำให้ใช้
+
+      # ==================== RCON และ REST API ====================
+      RCON_ENABLED: "true" # เปิด RCON และจำเป็นต่อการบันทึกก่อน Docker หยุด
+      RCON_PORT: "25575" # พอร์ต TCP สำหรับเชื่อมต่อ RCON
+      REST_API_ENABLED: "true" # เปิด REST API สำหรับคำสั่งและระบบตรวจผู้เล่น
+      REST_API_PORT: "8212" # พอร์ต TCP ของ REST API ไม่ควรเปิดสู่สาธารณะ
+      ENABLE_GAMEDATA_API: "${ENABLE_GAMEDATA_API:-true}" # เปิด GET /v1/api/game-data สำหรับ World Actor Snapshot; ต้องใช้อิมเมจ 2.6.0 ขึ้นไป
+      ENABLE_PLAYER_LOGGING: "true" # บันทึกและแจ้งผู้เล่นเข้าออก ต้องเปิด REST API
+      PLAYER_LOGGING_POLL_PERIOD: "15" # รอบตรวจรายชื่อผู้เล่นเข้าออกเป็นวินาที
+      LOG_FILTER_ENABLED: "true" # กรองบรรทัด Log ซ้ำเพื่อลดความรก
+      LOG_FORMAT_TYPE: "default" # รูปแบบ Log เลือก json logfmt colored plain หรือ default
+
+      # ==================== การสำรองข้อมูล ====================
+      BACKUP_ENABLED: "true" # เปิดการสำรองข้อมูลอัตโนมัติ
+      BACKUP_CRON_EXPRESSION: "0 0 * * *" # ตาราง Backup แบบ Cron ค่าเดิมคือทุกวันเที่ยงคืน
+      USE_BACKUP_SAVE_DATA: "true" # ใช้ระบบ Native Save Data Backup ของเกม
+      DELETE_OLD_BACKUPS: "true" # ลบ Backup ที่เก่ากว่าจำนวนวันที่กำหนด
+      OLD_BACKUP_DAYS: "30" # จำนวนวันที่เก็บ Backup ก่อนลบอัตโนมัติ
+
+      # ==================== อัปเดตและรีบูตอัตโนมัติ ====================
+      AUTO_UPDATE_ENABLED: "false" # เปิดตรวจและอัปเดตเซิร์ฟเวอร์อัตโนมัติ
+      AUTO_UPDATE_CRON_EXPRESSION: "0 * * * *" # ตารางตรวจอัปเดตแบบ Cron ค่าเดิมทุกต้นชั่วโมง
+      AUTO_UPDATE_WARN_MINUTES: "30" # เวลาประกาศเตือนก่อนอัปเดตเมื่อมีผู้เล่นออนไลน์
+      AUTO_REBOOT_ENABLED: "true" # เปิดรีบูตเซิร์ฟเวอร์อัตโนมัติ
+      AUTO_REBOOT_CRON_EXPRESSION: "0 5 * * *" # ตารางรีบูตแบบ Cron ตัวอย่างทุกวันเวลา 05:00
+      AUTO_REBOOT_WARN_MINUTES: "10" # เวลาประกาศเตือนผู้เล่นก่อนรีบูต
+      AUTO_REBOOT_EVEN_IF_PLAYERS_ONLINE: "false" # บังคับรีบูตแม้ยังมีผู้เล่นออนไลน์
+
+      # ==================== หยุดพักเซิร์ฟเวอร์เมื่อไม่มีผู้เล่น ====================
+      AUTO_PAUSE_ENABLED: "false" # พัก Process เมื่อไม่มีผู้เล่นเพื่อลดการใช้ทรัพยากร
+      AUTO_PAUSE_TIMEOUT_EST: "180" # เวลารอหลังผู้เล่นคนสุดท้ายออกก่อนพัก Process เป็นวินาที
+      AUTO_PAUSE_LOG: "true" # แสดง Log ของระบบ Auto Pause
+      AUTO_PAUSE_DEBUG: "false" # แสดง Debug Log ของระบบ Auto Pause
+
+      # ==================== การสร้างไฟล์ Config ====================
+      DISABLE_GENERATE_SETTINGS: "false" # ปิดการสร้าง PalWorldSettings.ini จาก Environment เมื่อเป็น true
+      DISABLE_GENERATE_ENGINE: "false" # ให้ระบบสร้าง Engine.ini จาก Environment เพื่อใช้ค่าหมวด Engine ด้านล่าง
+
+      # ==================== Discord: การแบ่งช่องและ Webhook ====================
+      # Invite Link: https://discord.gg/B9wUtyg9s ใช้เชิญสมาชิกเท่านั้น ไม่สามารถนำมาใส่แทน Webhook URL ได้
+      # information = สถานะเปิด/ปิด อัปเดต Backup และ Error | session = ผู้เล่นเข้า/ออก | welcome = ใช้ Bot Discord ภายนอกดูแลสมาชิกใหม่
+      DISCORD_WEBHOOK_URL: "${DISCORD_INFORMATION_WEBHOOK_URL:-}" # Webhook กลางของช่อง #information; ตัวอย่าง https://discord.com/api/webhooks/123456789/token และเว้นว่างเพื่อปิด
+      DISCORD_SUPPRESS_NOTIFICATIONS: "false" # false=แจ้งเตือนตามปกติ; true=ส่งแบบ silent เหมาะเมื่อข้อความระบบถี่
+      DISCORD_CONNECT_TIMEOUT: "30" # เวลารอเชื่อมต่อ Discord ต่อครั้งเป็นวินาที; ตัวอย่าง 30 และเพิ่มเป็น 60 เมื่ออินเทอร์เน็ตช้า
+      DISCORD_MAX_TIMEOUT: "30" # เวลารวมสูงสุดของคำขอ Webhook เป็นวินาที; ปกติใช้ 30
+
+      # ---------- #information: การเริ่ม ปิด อัปเดต และสำรองข้อมูล ----------
+      DISCORD_PRE_UPDATE_BOOT_MESSAGE: "🔄 กำลังอัปเดต Palworld Server กรุณารอสักครู่ | Discord: https://discord.gg/B9wUtyg9s" # ข้อความก่อนเริ่มอัปเดตเกม
+      DISCORD_PRE_UPDATE_BOOT_MESSAGE_ENABLED: "true" # true=แจ้งก่อนอัปเดต; false=ไม่ส่ง
+      DISCORD_PRE_UPDATE_BOOT_MESSAGE_URL: "${DISCORD_INFORMATION_WEBHOOK_URL:-}" # ส่งข้อความนี้ไป #information; ต้องเป็น Webhook ของช่อง ไม่ใช่ Invite Link
+      DISCORD_POST_UPDATE_BOOT_MESSAGE: "✅ อัปเดต Palworld Server เสร็จแล้ว กำลังเปิดให้บริการ" # ข้อความหลังติดตั้งอัปเดตสำเร็จ
+      DISCORD_POST_UPDATE_BOOT_MESSAGE_ENABLED: "true" # เปิดการแจ้งผลหลังอัปเดต
+      DISCORD_POST_UPDATE_BOOT_MESSAGE_URL: "${DISCORD_INFORMATION_WEBHOOK_URL:-}" # Webhook ช่อง #information
+      DISCORD_PRE_START_MESSAGE: "🟡 Palworld Server กำลังเริ่มทำงาน... ภายในอีก 1 นาที" # ข้อความเมื่อ Process เซิร์ฟเวอร์กำลังเริ่ม
+      DISCORD_PRE_START_MESSAGE_ENABLED: "true" # เปิดแจ้งสถานะเริ่มเซิร์ฟเวอร์
+      DISCORD_PRE_START_MESSAGE_URL: "${DISCORD_INFORMATION_WEBHOOK_URL:-}" # Webhook ช่อง #information
+      DISCORD_PRE_SHUTDOWN_MESSAGE: "🟠 Palworld Server กำลังปิดเพื่อบันทึกข้อมูล กรุณาออกจากเกมอย่างปลอดภัย" # ข้อความก่อนหยุด Process
+      DISCORD_PRE_SHUTDOWN_MESSAGE_ENABLED: "true" # เปิดแจ้งก่อนปิดเซิร์ฟเวอร์
+      DISCORD_PRE_SHUTDOWN_MESSAGE_URL: "${DISCORD_INFORMATION_WEBHOOK_URL:-}" # Webhook ช่อง #information
+      DISCORD_POST_SHUTDOWN_MESSAGE: "🔴 Palworld Server ปิดเรียบร้อยแล้ว" # ข้อความหลังหยุดเซิร์ฟเวอร์
+      DISCORD_POST_SHUTDOWN_MESSAGE_ENABLED: "true" # เปิดแจ้งหลังปิดเซิร์ฟเวอร์
+      DISCORD_POST_SHUTDOWN_MESSAGE_URL: "${DISCORD_INFORMATION_WEBHOOK_URL:-}" # Webhook ช่อง #information
+      DISCORD_PRE_BACKUP_MESSAGE: "💾 กำลังสำรองข้อมูลโลกและตัวละคร..." # ข้อความก่อนสร้าง Backup
+      DISCORD_PRE_BACKUP_MESSAGE_ENABLED: "true" # เปิดแจ้งก่อน Backup; ปิดได้หาก Backup ถี่และข้อความมากเกินไป
+      DISCORD_PRE_BACKUP_MESSAGE_URL: "${DISCORD_INFORMATION_WEBHOOK_URL:-}" # Webhook ช่อง #information
+      DISCORD_POST_BACKUP_MESSAGE: "✅ สำรองข้อมูลเสร็จแล้ว: `file_path`" # file_path จะถูกแทนด้วยตำแหน่งไฟล์ Backup
+      DISCORD_POST_BACKUP_MESSAGE_ENABLED: "true" # เปิดแจ้งหลังสร้าง Backup สำเร็จ
+      DISCORD_POST_BACKUP_MESSAGE_URL: "${DISCORD_INFORMATION_WEBHOOK_URL:-}" # Webhook ช่อง #information
+      DISCORD_PRE_BACKUP_DELETE_MESSAGE: "🧹 กำลังลบ Backup ที่เก่ากว่า `old_backup_days` วัน" # old_backup_days จะใช้ค่าจาก OLD_BACKUP_DAYS
+      DISCORD_PRE_BACKUP_DELETE_MESSAGE_ENABLED: "false" # ตัวอย่างปิดข้อความก่อนลบเพื่อลดข้อความซ้ำ
+      DISCORD_PRE_BACKUP_DELETE_MESSAGE_URL: "${DISCORD_INFORMATION_WEBHOOK_URL:-}" # Webhook ช่อง #information
+      DISCORD_POST_BACKUP_DELETE_MESSAGE: "🧹 ลบ Backup ที่เก่ากว่า `old_backup_days` วันเรียบร้อยแล้ว" # ข้อความยืนยันหลังลบ Backup เก่า
+      DISCORD_POST_BACKUP_DELETE_MESSAGE_ENABLED: "true" # เปิดแจ้งเมื่อทำความสะอาด Backup เสร็จ
+      DISCORD_POST_BACKUP_DELETE_MESSAGE_URL: "${DISCORD_INFORMATION_WEBHOOK_URL:-}" # Webhook ช่อง #information
+      DISCORD_ERR_BACKUP_DELETE_MESSAGE: "⚠️ ไม่สามารถลบ Backup เก่าได้ กรุณาตรวจสิทธิ์ไฟล์และค่า OLD_BACKUP_DAYS=`old_backup_days`" # ข้อความ Error เมื่อลบ Backup ไม่สำเร็จ
+      DISCORD_ERR_BACKUP_DELETE_MESSAGE_ENABLED: "true" # ควรเปิดเพื่อให้ผู้ดูแลเห็นปัญหา
+      DISCORD_ERR_BACKUP_DELETE_MESSAGE_URL: "${DISCORD_INFORMATION_WEBHOOK_URL:-}" # Webhook ช่อง #information
+
+      # ---------- #session: ผู้เล่นเข้าและออกจากเกม ----------
+      DISCORD_PLAYER_JOIN_MESSAGE: "🟢 `player_name` เข้า Palworld Server แล้ว | ข้อมูลชุมชน: https://discord.gg/B9wUtyg9s" # player_name จะถูกแทนด้วยชื่อผู้เล่น
+      DISCORD_PLAYER_JOIN_MESSAGE_ENABLED: "true" # เปิดข้อความผู้เล่นเข้า; ต้องเปิด REST_API_ENABLED และ ENABLE_PLAYER_LOGGING
+      DISCORD_PLAYER_JOIN_MESSAGE_URL: "${DISCORD_SESSION_WEBHOOK_URL:-}" # Webhook ของช่อง #session
+      DISCORD_PLAYER_LEAVE_MESSAGE: "⚪ `player_name` ออกจาก Palworld Server แล้ว" # player_name จะถูกแทนด้วยชื่อผู้เล่น
+      DISCORD_PLAYER_LEAVE_MESSAGE_ENABLED: "true" # เปิดข้อความผู้เล่นออก; ต้องเปิด REST API และ Player Logging
+      DISCORD_PLAYER_LEAVE_MESSAGE_URL: "${DISCORD_SESSION_WEBHOOK_URL:-}" # Webhook ของช่อง #session
+
+      # ---------- #welcome: ข้อความต้อนรับสมาชิก Discord ----------
+      # คอนเทนเนอร์ Palworld นี้ไม่มี Event ตรวจจับสมาชิก Discord เข้าใหม่ จึงไม่สามารถใช้ DISCORD_* ส่ง Welcome อัตโนมัติได้
+      # ให้ใช้ Discord Community Welcome Screen, AutoMod หรือ Bot เช่น Carl-bot/Dyno แล้วตั้งช่องปลายทางเป็น #welcome
+      # ตัวอย่างข้อความ Welcome: ยินดีต้อนรับสู่ชุมชน Palworld กรุณาอ่าน #information และติดตามสถานะผู้เล่นที่ #session
+
+      # ==================== ค่าเกมพื้นฐานและ Randomizer ====================
+      DIFFICULTY: "None" # ระดับความยากเลือก None Normal หรือ Difficult
+      RANDOMIZER_TYPE: "None" # รูปแบบสุ่ม Pal เลือก None Region หรือ All
+      RANDOMIZER_SEED: "" # Seed สำหรับระบบสุ่ม Pal
+      IS_RANDOMIZER_PAL_LEVEL_RANDOM: "false" # สุ่มเลเวล Pal ป่าเต็มรูปแบบแทนการอิงพื้นที่
+      DAYTIME_SPEEDRATE: "1.000000" # ความเร็วเวลากลางวัน ค่ายิ่งสูงกลางวันยิ่งสั้น
+      NIGHTTIME_SPEEDRATE: "1.000000" # ความเร็วเวลากลางคืน ค่ายิ่งสูงกลางคืนยิ่งสั้น
+      EXP_RATE: "1.000000" # ตัวคูณค่าประสบการณ์ที่ได้รับ
+      PAL_CAPTURE_RATE: "1.000000" # ตัวคูณโอกาสจับ Pal
+      PAL_SPAWN_NUM_RATE: "1.000000" # ตัวคูณจำนวน Pal ที่เกิดในโลก
+
+      # ==================== ความเสียหายและการฟื้นฟู ====================
+      PAL_DAMAGE_RATE_ATTACK: "1.000000" # ตัวคูณความเสียหายที่ Pal สร้าง
+      PAL_DAMAGE_RATE_DEFENSE: "1.000000" # ตัวคูณความเสียหายที่ Pal ได้รับ
+      PLAYER_DAMAGE_RATE_ATTACK: "1.000000" # ตัวคูณความเสียหายที่ผู้เล่นสร้าง
+      PLAYER_DAMAGE_RATE_DEFENSE: "1.000000" # ตัวคูณความเสียหายที่ผู้เล่นได้รับ
+      PLAYER_STOMACH_DECREASE_RATE: "1.000000" # อัตราลดความหิวของผู้เล่น
+      PLAYER_STAMINA_DECREASE_RATE: "1.000000" # อัตราลด Stamina ของผู้เล่น
+      PLAYER_AUTO_HP_REGEN_RATE: "1.000000" # อัตราฟื้น HP อัตโนมัติของผู้เล่น
+      PLAYER_AUTO_HP_REGEN_RATE_IN_SLEEP: "1.000000" # อัตราฟื้น HP ของผู้เล่นขณะนอน
+      PAL_STOMACH_DECREASE_RATE: "1.000000" # อัตราลดความหิวของ Pal
+      PAL_STAMINA_DECREASE_RATE: "1.000000" # อัตราลด Stamina ของ Pal
+      PAL_AUTO_HP_REGEN_RATE: "1.000000" # อัตราฟื้น HP อัตโนมัติของ Pal
+      PAL_AUTO_HP_REGEN_RATE_IN_SLEEP: "1.000000" # อัตราฟื้น HP ของ Pal ใน Palbox
+
+      # ==================== สิ่งปลูกสร้าง ทรัพยากร และไอเทม ====================
+      BUILD_OBJECT_HP_RATE: "1.000000" # ตัวคูณ HP ของสิ่งปลูกสร้าง
+      BUILD_OBJECT_DAMAGE_RATE: "1.000000" # ตัวคูณความเสียหายที่สิ่งปลูกสร้างได้รับ
+      BUILD_OBJECT_DETERIORATION_DAMAGE_RATE: "1.000000" # อัตราเสื่อมสภาพของสิ่งปลูกสร้าง
+      COLLECTION_DROP_RATE: "1.000000" # ตัวคูณจำนวนทรัพยากรที่เก็บได้
+      COLLECTION_OBJECT_HP_RATE: "1.000000" # ตัวคูณ HP ของวัตถุทรัพยากร
+      COLLECTION_OBJECT_RESPAWN_SPEED_RATE: "1.000000" # รอบเกิดใหม่ของทรัพยากร ค่ายิ่งต่ำยิ่งเกิดเร็ว
+      ENEMY_DROP_ITEM_RATE: "1.000000" # ตัวคูณไอเทมที่ศัตรูดรอป
+      ITEM_WEIGHT_RATE: "1.000000" # ตัวคูณน้ำหนักไอเทม
+      EQUIPMENT_DURABILITY_DAMAGE_RATE: "1.000000" # ตัวคูณการลดความทนทานอุปกรณ์
+      ITEM_CORRUPTION_MULTIPLIER: "1.000000" # ตัวคูณอัตราการเน่าเสียของไอเทม
+      ITEM_CONTAINER_FORCE_MARK_DIRTY_INTERVAL: "1.000000" # รอบบังคับอัปเดตสถานะ Container ไอเทม
+      DROP_ITEM_MAX_NUM: "3000" # จำนวนไอเทมตกบนโลกสูงสุด
+      DROP_ITEM_MAX_NUM_UNKO: "100" # จำนวนกองมูลสูงสุดในโลก
+      DROP_ITEM_ALIVE_MAX_HOURS: "1.000000" # ชั่วโมงก่อนที่ไอเทมตกพื้นจะหาย
+      PHYSICS_ACTIVE_DROP_ITEM_MAX_NUM: "-1" # จำนวนไอเทมตกที่ใช้ฟิสิกส์พร้อมกัน -1 คือไม่จำกัด
+
+      # ==================== ฐาน กิลด์ และแรงงาน ====================
+      BASE_CAMP_MAX_NUM: "128" # จำนวนฐานทั้งหมดสูงสุดในโลก
+      BASE_CAMP_WORKER_MAX_NUM: "15" # จำนวน Pal ทำงานสูงสุดต่อฐาน
+      BASE_CAMP_MAX_NUM_IN_GUILD: "4" # จำนวนฐานสูงสุดต่อกิลด์
+      MAX_BUILDING_LIMIT_NUM: "0" # จำนวนสิ่งปลูกสร้างสูงสุดต่อฐาน 0 คือไม่จำกัด
+      GUILD_PLAYER_MAX_NUM: "20" # จำนวนสมาชิกสูงสุดต่อกิลด์
+      COOP_PLAYER_MAX_NUM: "4" # จำนวนผู้เล่นสูงสุดใน Co-op
+      AUTO_RESET_GUILD_NO_ONLINE_PLAYERS: "false" # ลบกิลด์อัตโนมัติเมื่อไม่มีสมาชิกออนไลน์ตามเวลา
+      AUTO_RESET_GUILD_TIME_NO_ONLINE_PLAYERS: "72.000000" # ชั่วโมงก่อนรีเซ็ตกิลด์ที่ไม่มีผู้เล่นออนไลน์
+      GUILD_REJOIN_COOLDOWN_MINUTES: "0" # นาทีที่ต้องรอก่อนกลับเข้ากิลด์
+      AUTO_TRANSFER_MASTER_CHECK_INTERVAL_SECONDS: "3600.000000" # รอบตรวจการโอนหัวหน้ากิลด์เป็นวินาที
+      AUTO_TRANSFER_MASTER_THRESHOLD_DAYS: "14" # วันที่หัวหน้ากิลด์ไม่เข้าเกมก่อนโอนตำแหน่ง
+      MAX_GUILDS_PER_FRAME: "10" # จำนวนกิลด์สูงสุดที่ประมวลผลต่อเฟรม
+      WORK_SPEED_RATE: "1.000000" # ตัวคูณความเร็วการทำงาน
+      MONSTER_FARM_ACTION_SPEED_RATE: "1.000000" # ตัวคูณความเร็วการทำงานในฟาร์มของ Pal
+      PAL_EGG_DEFAULT_HATCHING_TIME: "1.000000" # ชั่วโมงฟักไข่ขนาดใหญ่ตามค่าเริ่มต้น
+
+      # ==================== กฎการเล่นและ PvP ====================
+      DEATH_PENALTY: "Item" # บทลงโทษตายเลือก None Item ItemAndEquipment หรือ All
+      ENABLE_PLAYER_TO_PLAYER_DAMAGE: "false" # อนุญาตให้ผู้เล่นทำความเสียหายกัน
+      ENABLE_FRIENDLY_FIRE: "false" # เปิด Friendly Fire
+      ENABLE_INVADER_ENEMY: "true" # เปิดเหตุการณ์ศัตรูบุกฐาน
+      ACTIVE_UNKO: "false" # เปิดระบบ UNKO ของเกม
+      ENABLE_AIM_ASSIST_PAD: "true" # เปิด Aim Assist สำหรับจอย
+      ENABLE_AIM_ASSIST_KEYBOARD: "false" # เปิด Aim Assist สำหรับคีย์บอร์ด
+      IS_MULTIPLAY: "true" # เปิดโหมด Multiplayer
+      IS_PVP: "false" # เปิดโหมด PvP
+      HARDCORE: "false" # เปิดโหมด Hardcore
+      CHARACTER_RECREATE_IN_HARDCORE: "false" # อนุญาตสร้างตัวละครใหม่หลังตายใน Hardcore
+      PAL_LOST: "false" # ให้ Pal หายเมื่อ Pal ตายในโหมด Hardcore
+      CAN_PICKUP_OTHER_GUILD_DEATH_PENALTY_DROP: "false" # ให้กิลด์อื่นเก็บของที่ตกจากการตายได้
+      ENABLE_NON_LOGIN_PENALTY: "true" # เปิดบทลงโทษเมื่อผู้เล่นไม่เข้าเกมนาน
+      ENABLE_FAST_TRAVEL: "true" # เปิดใช้งาน Fast Travel
+      IS_START_LOCATION_SELECT_BY_MAP: "false" # อนุญาตเลือกจุดเริ่มต้นจากแผนที่
+      EXIST_PLAYER_AFTER_LOGOUT: "false" # ให้ตัวละครผู้เล่นยังคงอยู่หลัง Logout
+      ENABLE_DEFENSE_OTHER_GUILD_PLAYER: "false" # เปิดการป้องกันผู้เล่นจากกิลด์อื่น
+      INVISIBLE_OTHER_GUILD_BASE_CAMP_AREA_FX: "false" # ซ่อนเอฟเฟกต์พื้นที่ฐานของกิลด์อื่น
+      BUILD_AREA_LIMIT: "false" # เปิดข้อจำกัดพื้นที่ก่อสร้าง
+      DISPLAY_PVP_ITEM_NUM_ON_WORLD_MAP_BASE_CAMP: "false" # แสดงจำนวนไอเทม PvP ของฐานบนแผนที่
+      DISPLAY_PVP_ITEM_NUM_ON_WORLD_MAP_PLAYER: "false" # แสดงจำนวนไอเทม PvP ของผู้เล่นบนแผนที่
+      ADDITIONAL_DROP_ITEM_WHEN_PLAYER_KILLING_IN_PVP_MODE: "PlayerDropItem" # ประเภทไอเทมเพิ่มเมื่อฆ่าผู้เล่นใน PvP
+      ADDITIONAL_DROP_ITEM_WHEN_PLAYER_KILLING_IN_PVP_MODE_NUM: "1" # จำนวนไอเทมเพิ่มเมื่อฆ่าผู้เล่นใน PvP
+      ADDITIONAL_DROP_ITEM_WHEN_PLAYER_KILLING_IN_PVP_MODE_ENABLED: "false" # เปิดดรอปไอเทมเพิ่มเมื่อฆ่าผู้เล่นใน PvP
+
+      # ==================== การเกิดใหม่และระบบโลก ====================
+      AUTO_SAVE_SPAN: "300.000000" # ช่วงเวลาบันทึกอัตโนมัติเป็นวินาที
+      SUPPLY_DROP_SPAN: "180" # ช่วงเวลาระหว่าง Supply Drop เป็นนาที
+      BLOCK_RESPAWN_TIME: "5.000000" # เวลาบล็อกการเกิดใหม่
+      RESPAWN_PENALTY_DURATION_THRESHOLD: "0.000000" # เกณฑ์ระยะเวลาที่เริ่มใช้บทลงโทษการเกิดใหม่
+      RESPAWN_PENALTY_TIME_SCALE: "2.000000" # ตัวคูณเวลาบทลงโทษการเกิดใหม่
+      ENABLE_PREDATOR_BOSS_PAL: "true" # เปิด Predator Boss Pal
+      SERVER_REPLICATE_PAWN_CULL_DISTANCE: "15000.000000" # ระยะที่เซิร์ฟเวอร์ส่งข้อมูลตัวละครให้ Client
+
+      # ==================== ระบบผู้เล่น การแชต และการเข้าถึง ====================
+      REGION: "" # ชื่อ Region ของเซิร์ฟเวอร์
+      USEAUTH: "true" # เปิดระบบยืนยันตัวตน
+      BAN_LIST_URL: "https://b.palworldgame.com/api/banlist.txt" # URL รายการ Ban ที่เซิร์ฟเวอร์ใช้
+      SHOW_PLAYER_LIST: "false" # อนุญาตให้แสดงรายชื่อผู้เล่น
+      CHAT_POST_LIMIT_PER_MINUTE: "30" # จำนวนข้อความสูงสุดต่อผู้เล่นต่อนาที
+      ENABLE_VOICE_CHAT: "false" # เปิด Voice Chat
+      VOICE_CHAT_MAX_VOLUME_DISTANCE: "3000.000000" # ระยะที่เสียงสนทนาดังเต็มที่
+      VOICE_CHAT_ZERO_VOLUME_DISTANCE: "15000.000000" # ระยะที่เสียงสนทนาเบาจนเป็นศูนย์
+      IS_SHOW_JOIN_LEFT_MESSAGE: "true" # แสดงข้อความเข้าและออกในเกม
+      ALLOW_CLIENT_MOD: "true" # อนุญาตให้ Client ใช้ Mod
+      PLAYER_DATA_PAL_STORAGE_UPDATE_CHECK_TICK_INTERVAL: "1.000000" # รอบตรวจอัปเดต Pal Storage ของผู้เล่น
+
+      # ==================== Global Palbox และค่าสถานะตัวละคร ====================
+      ALLOW_GLOBAL_PALBOX_EXPORT: "true" # อนุญาตส่ง Pal ไป Global Palbox
+      ALLOW_GLOBAL_PALBOX_IMPORT: "false" # อนุญาตนำ Pal จาก Global Palbox เข้าเซิร์ฟเวอร์
+      ALLOW_ENHANCE_STAT_HEALTH: "true" # อนุญาตเพิ่มค่าสถานะ Health
+      ALLOW_ENHANCE_STAT_ATTACK: "true" # อนุญาตเพิ่มค่าสถานะ Attack
+      ALLOW_ENHANCE_STAT_STAMINA: "true" # อนุญาตเพิ่มค่าสถานะ Stamina
+      ALLOW_ENHANCE_STAT_WEIGHT: "true" # อนุญาตเพิ่มค่าสถานะ Weight
+      ALLOW_ENHANCE_STAT_WORK_SPEED: "true" # อนุญาตเพิ่มค่าสถานะ Work Speed
+
+      # ==================== เทคโนโลยีและข้อมูลสิ่งปลูกสร้าง ====================
+      DENY_TECHNOLOGY_LIST: "" # รายการ Technology ID ที่ห้ามใช้
+      ENABLE_BUILDING_PLAYER_UID_DISPLAY: "false" # แสดง Player UID ของเจ้าของสิ่งปลูกสร้าง
+      BUILDING_NAME_DISPLAY_CACHE_TTL_SECONDS: "60" # อายุ Cache ชื่อสิ่งปลูกสร้างเป็นวินาที
+
+      # ==================== Engine และ Network Tuning ====================
+      LAN_SERVER_MAX_TICK_RATE: "120" # Tick Rate สูงสุดสำหรับการเชื่อมต่อ LAN
+      NET_SERVER_MAX_TICK_RATE: "120" # Tick Rate สูงสุดสำหรับการเชื่อมต่ออินเทอร์เน็ต
+      CONFIGURED_INTERNET_SPEED: "104857600" # แบนด์วิดท์อินเทอร์เน็ตสมมติเป็นไบต์ต่อวินาที
+      CONFIGURED_LAN_SPEED: "104857600" # แบนด์วิดท์ LAN สมมติเป็นไบต์ต่อวินาที
+      MAX_CLIENT_RATE: "104857600" # อัตราส่งข้อมูลสูงสุดต่อ Client
+      MAX_INTERNET_CLIENT_RATE: "104857600" # อัตราส่งข้อมูลสูงสุดต่อ Internet Client
+      SMOOTH_FRAME_RATE: "true" # เปิดการปรับ Frame Rate ให้เรียบขึ้น
+      SMOOTH_FRAME_RATE_UPPER_LIMIT: "120.000000" # ขอบบนของช่วง Frame Rate ที่ใช้ปรับให้เรียบ
+      SMOOTH_FRAME_RATE_LOWER_LIMIT: "30.000000" # ขอบล่างของช่วง Frame Rate ที่ใช้ปรับให้เรียบ
+      USE_FIXED_FRAME_RATE: "false" # บังคับใช้ Frame Rate คงที่
+      FIXED_FRAME_RATE: "120.000000" # ค่า Frame Rate คงที่เมื่อเปิดใช้งาน
+      MIN_DESIRED_FRAME_RATE: "60.000000" # Frame Rate ขั้นต่ำที่ Engine พยายามรักษา
+      NET_CLIENT_TICKS_PER_SECOND: "120" # จำนวนรอบอัปเดตข้อมูล Client ต่อวินาที
+
+      # ==================== ARM64 และ Box64 เฉพาะเครื่อง ARM ====================
+      ARM64_DEVICE: "generic" # รุ่นอุปกรณ์ ARM64 เลือก generic m1 rpi5 หรือ adlink
+      BOX64_DYNAREC_STRONGMEM: "1" # ระดับจำลอง Strong Memory ของ Box64 เลือก 0-3
+      BOX64_DYNAREC_BIGBLOCK: "1" # ระดับ BigBlock ของ Box64 เลือก 0-3
+      BOX64_DYNAREC_SAFEFLAGS: "1" # ระดับจัดการ Flags ของ Box64 เลือก 0-2
+      BOX64_DYNAREC_FASTROUND: "1" # เปิดการปัดเศษแบบเร็วของ Box64 เลือก 0 หรือ 1
+      BOX64_DYNAREC_FASTNAN: "1" # เปิดการจัดการ NaN แบบเร็วของ Box64 เลือก 0 หรือ 1
+      BOX64_DYNAREC_X87DOUBLE: "0" # บังคับ x87 ใช้ Double เลือก 0 หรือ 1
+
+
+
+  # จำกัดสิทธิ์ Docker API ให้ Dashboard ใช้เฉพาะงานจัดการคอนเทนเนอร์
+  docker-proxy:
+    image: tecnativa/docker-socket-proxy:latest
+    container_name: palworld-docker-proxy
+    restart: unless-stopped
+    environment:
+      TZ: "Asia/Bangkok"
+      LOG_LEVEL: "warning"
+      CONTAINERS: "1"
+      POST: "1"
+      PING: "1"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    networks:
+      - default
+
+  dashboard:
+    image: palworld-dashboard-api:local
+    build:
+      context: ./dashboard
+    container_name: palworld-dashboard
+    restart: unless-stopped
+    depends_on:
+      palworld:
+        condition: service_started
+      docker-proxy:
+        condition: service_started
+    ports:
+      - "${DASHBOARD_BIND_ADDRESS:-0.0.0.0}:${DASHBOARD_PORT:-8080}:8080/tcp"
+    environment:
+      TZ: "Asia/Bangkok"
+      DASHBOARD_TIMEZONE: "Asia/Bangkok"
+      PALWORLD_API_URL: "http://palworld:8212/v1/api"
+      PALWORLD_ADMIN_PASSWORD: "${PALWORLD_ADMIN_PASSWORD}"
+      PALWORLD_CONTAINER_NAME: "palworld-server"
+      PALWORLD_DATA_DIR: "/palworld-data"
+      PALWORLD_PUID: "1000"
+      PALWORLD_PGID: "1000"
+      DOCKER_API_URL: "http://docker-proxy:2375"
+      DASHBOARD_DATA_DIR: "/data"
+      DASHBOARD_USERNAME: "${DASHBOARD_USERNAME:-admin}"
+      DASHBOARD_PASSWORD: "${DASHBOARD_PASSWORD:-CHANGE_ME_DASHBOARD_PASSWORD}"
+      DASHBOARD_REFRESH_SECONDS: "${DASHBOARD_REFRESH_SECONDS:-15}"
+      DASHBOARD_ACTIONS_ENABLED: "${DASHBOARD_ACTIONS_ENABLED:-true}"
+      DASHBOARD_DISCORD_WEBHOOK_URL: "${DISCORD_INFORMATION_WEBHOOK_URL:-}"
+      DASHBOARD_MAX_UPLOAD_MB: "${DASHBOARD_MAX_UPLOAD_MB:-4096}"
+      DASHBOARD_MAX_EXPANDED_MB: "${DASHBOARD_MAX_EXPANDED_MB:-8192}"
+      PALWORLD_START_TIMEOUT_SECONDS: "${PALWORLD_START_TIMEOUT_SECONDS:-900}"
+      PALWORLD_STOP_TIMEOUT_SECONDS: "${PALWORLD_STOP_TIMEOUT_SECONDS:-60}"
+    volumes:
+      # Dashboard ต้องอ่าน/เขียนข้อมูลเซฟเพื่อสร้าง Export และทำ Import
+      - ./palworld:/palworld-data:rw
+      # เก็บคิวงาน ประวัติ Ban ไฟล์ Import และไฟล์ Export แบบถาวร
+      - ./dashboard/data:/data:rw
+      # ผูก source เพื่อแก้ไข Dashboard โดยไม่ต้องกังวล image cache
+      - ./dashboard/server.py:/app/server.py:ro
+      - ./dashboard/index.html:/app/index.html:ro
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m,mode=1777
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/health', timeout=3)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+

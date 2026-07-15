@@ -1,0 +1,7 @@
+.DS_Store
+.env
+palworld/
+dashboard/data/*
+!dashboard/data/.gitkeep
+__pycache__/
+*.pyc
