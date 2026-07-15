@@ -1,4 +1,4 @@
-# คู่มือใช้งาน Palworld Server Dashboard Thai ฉบับเต็ม
+# คู่มือใช้งาน Palworld Server & Dashboard Thai Edition ฉบับเต็ม
 
 ## ขอบเขตเอกสาร
 
@@ -1786,7 +1786,7 @@ cat dashboard/data/maintenance.json 2>/dev/null || true
 
 ---
 
-เอกสารฉบับนี้ปรับปรุงสำหรับ Palworld Server Dashboard Thai ณ วันที่ 15 กรกฎาคม 2026
+เอกสารปรับปรุงสำหรับชุด ณ วันที่ 15 กรกฎาคม 2026
 
 ## [TH] เครดิตและแหล่งอ้างอิง
 

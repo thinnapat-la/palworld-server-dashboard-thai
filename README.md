@@ -1,6 +1,6 @@
-# Palworld Server Dashboard Thai
+# Palworld Server & Dashboard Thai Edition
 
-ชุด Docker Compose สำหรับติดตั้ง **Palworld Dedicated Server พร้อม Dashboard ผู้ดูแล** โดยเอกสารและหน้าจอหลักเป็นภาษาไทย รองรับการดูสถานะเซิร์ฟเวอร์ จัดการผู้เล่น Ban/Unban สั่งงานผู้ดูแล ตั้งคิว Import/Export พร้อม Safety Backup และโหลด World Actor Snapshot ผ่าน GameData API
+ชุด Docker Compose สำหรับติดตั้ง **Palworld Dedicated Server พร้อม Dashboard ผู้ดูแลภาษาไทย** โดยเอกสารและหน้าจอหลักเป็นภาษาไทย รองรับการดูสถานะเซิร์ฟเวอร์ จัดการผู้เล่น Ban/Unban สั่งงานผู้ดูแล ตั้งคิว Import/Export พร้อม Safety Backup และโหลด World Actor Snapshot ผ่าน GameData API
 
 ## ความสามารถหลัก
 
@@ -275,12 +275,39 @@ Pal/
 - Import มีสิทธิ์แทนที่เซฟทั้งชุด ควรตรวจไฟล์และเลือกช่วงไม่มีผู้เล่น
 - เก็บ Backup นอกเครื่องเพิ่มอีกชุด เพราะ Export/Safety Backup ยังอยู่บนดิสก์เดียวกับเซิร์ฟเวอร์โดยค่าเริ่มต้น
 
+## วิธีตั้งค่าตัวเกมภาษาไทย
+
+เลือกดูวิธีตั้งค่าภาษาไทยตามแพลตฟอร์มที่คุณใช้เล่นด้านล่างนี้:
+
+### 🔹 สำหรับ PC Game Pass / Xbox App / Microsoft Store
+หากคุณเล่น Palworld ผ่านระบบ PC Game Pass (Xbox App บน Windows) แล้วตัวเกมไม่แสดงผลเป็นภาษาไทย ให้ทำตามขั้นตอนดังนี้:
+
+### ตั้งค่าผ่านระบบ Windows (วิธีหลัก)
+1. เปิด **Settings** ของ Windows (กดปุ่มลัด `Windows + i` บนคีย์บอร์ด)
+2. ไปที่เมนู **Time & Language** > เลือก **Language & region**
+3. ดูที่หัวข้อ **Preferred languages**:
+   * หากมีภาษาไทยอยู่แล้ว ให้คลิกค้างแล้ว**ลากภาษาไทยขึ้นมาไว้บนสุด**
+   * หากไม่มีภาษาไทย ให้กดปุ่ม **Add a language** เพื่อทำการติดตั้งภาษาไทยก่อน
+4. รีสตาร์ทคอมพิวเตอร์ 1 ครั้ง แล้วเข้าเกมใหม่อีกครั้ง
+
+### บังคับเปลี่ยนภาษาผ่านไฟล์ระบบ (กรณีไม่อยากแก้ภาษาเครื่อง)
+1. กดปุ่ม `Windows + R` บนคีย์บอร์ด พิมพ์คำว่า `%localappdata%` แล้วกด **Enter**
+2. เข้าไปยังโฟลเดอร์: `Pal` > `Saved` > `Config` > `WinGDK`
+3. ดับเบิ้ลคลิกเปิดไฟล์ที่ชื่อว่า **Engine.ini** ด้วยโปรแกรม Notepad
+4. เลื่อนลงมาที่บรรทัดล่างสุด แล้วคัดลอกข้อความด้านล่างนี้ไปวาง:
+
+```ini
+[Internationalization]
+Culture=th
+```
+5. กดบันทึกไฟล์ (**Save**) ปิดโปรแกรม แล้วเข้าเกมตามปกติ
+
 ## เอกสารฉบับเต็ม
 
 อ่านรายละเอียดทุกเมนู ทุกขั้นตอนการกู้คืน ตัวแปรทั้งหมด และ Troubleshooting ได้ที่:
 
-- [`PALWORLD-DASHBOARD-MANUAL-TH.md`](PALWORLD-DASHBOARD-MANUAL-TH.md)
-- [`DASHBOARD-MAINTENANCE.md`](DASHBOARD-MAINTENANCE.md)
+- [`FULL_GUIDE_TH.md`](FULL_GUIDE_TH.md): คู่มือฉบับเต็ม การติดตั้ง ทุกเมนู GameData API Security และ Troubleshooting
+- [`DASHBOARD-MAINTENANCE.md`](DASHBOARD-MAINTENANCE.md): คู่มือ Dashboard
 
 ## แหล่งอ้างอิงหลัก
 
