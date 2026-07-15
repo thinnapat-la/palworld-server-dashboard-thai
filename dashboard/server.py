@@ -16,7 +16,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path, PurePosixPath
 from zoneinfo import ZoneInfo
 
-APP_VERSION = "5.0.0"
+APP_VERSION = "5.1.0"
 API_URL = os.getenv("PALWORLD_API_URL", "http://127.0.0.1:8212/v1/api").rstrip("/")
 ADMIN_PASSWORD = os.getenv("PALWORLD_ADMIN_PASSWORD", "")
 DASHBOARD_USERNAME = os.getenv("DASHBOARD_USERNAME", "admin")
@@ -175,6 +175,62 @@ def container_status():
         }
     except Exception as exc:
         return {"available": False, "running": False, "status": "unknown", "health": "unknown", "error": str(exc)}
+
+
+def get_restart_policy():
+    policy = (container_info().get("HostConfig") or {}).get("RestartPolicy") or {}
+    name = str(policy.get("Name") or "no")
+    try:
+        maximum_retry_count = int(policy.get("MaximumRetryCount") or 0)
+    except (TypeError, ValueError):
+        maximum_retry_count = 0
+    return {
+        "Name": name,
+        "MaximumRetryCount": maximum_retry_count,
+    }
+
+
+def restart_policies_match(left, right):
+    if (left or {}).get("Name", "no") != (right or {}).get("Name", "no"):
+        return False
+    if (left or {}).get("Name") == "on-failure":
+        return int((left or {}).get("MaximumRetryCount") or 0) == int(
+            (right or {}).get("MaximumRetryCount") or 0
+        )
+    return True
+
+
+def set_restart_policy(policy):
+    if not isinstance(policy, dict):
+        raise ValueError("Restart Policy ไม่ถูกต้อง")
+    name = str(policy.get("Name") or "no")
+    if name not in ("no", "always", "unless-stopped", "on-failure"):
+        raise ValueError(f"ไม่รองรับ Restart Policy: {name}")
+
+    restart_policy = {"Name": name}
+    if name == "on-failure":
+        retry_count = int(policy.get("MaximumRetryCount") or 0)
+        if retry_count < 0:
+            raise ValueError("MaximumRetryCount ต้องไม่ติดลบ")
+        restart_policy["MaximumRetryCount"] = retry_count
+
+    quoted = urllib.parse.quote(PALWORLD_CONTAINER_NAME, safe="")
+    docker_request(
+        f"/containers/{quoted}/update",
+        method="POST",
+        payload={"RestartPolicy": restart_policy},
+        timeout=30,
+    )
+
+    current = get_restart_policy()
+    expected = {
+        "Name": name,
+        "MaximumRetryCount": int(restart_policy.get("MaximumRetryCount") or 0),
+    }
+    if not restart_policies_match(current, expected):
+        raise RuntimeError(
+            f"เปลี่ยน Restart Policy ไม่สำเร็จ: ต้องการ {expected} แต่ได้ {current}"
+        )
 
 
 def stop_container():
@@ -341,6 +397,7 @@ def create_job(job_type, schedule_at, warning_seconds, message, source_file=None
         "source_file": source_file,
         "output_file": None,
         "safety_backup": None,
+        "restart_policy": None,
         "created_at": iso_now(),
         "started_at": None,
         "finished_at": None,
@@ -532,85 +589,175 @@ def extract_import_archive(path, destination):
     return extracted_saved
 
 
-def announce_and_wait(job):
+def wait_for_shutdown_completion(warning_seconds):
+    warning_seconds = max(0, int(warning_seconds))
+    shutdown_started_at = time.monotonic()
+    force_stop_after = shutdown_started_at + warning_seconds + 5
+    deadline = force_stop_after + STOP_TIMEOUT_SECONDS + 30
+    last_error = ""
+
+    while time.monotonic() < deadline:
+        status = container_status()
+        if status.get("available") and not status.get("running"):
+            return
+        if not status.get("available"):
+            last_error = status.get("error", "อ่านสถานะคอนเทนเนอร์ไม่ได้")
+
+        if time.monotonic() >= force_stop_after:
+            try:
+                api_request("info", timeout=3)
+            except Exception:
+                stop_container()
+                return
+        time.sleep(1)
+
+    print(
+        "Palworld shutdown did not stop the container within the expected time; "
+        f"falling back to Docker stop. Last status error: {last_error or '-'}"
+    )
+    stop_container()
+
+
+def shutdown_for_maintenance(job):
     warning = int(job.get("warning_seconds", 0))
     message = job.get("message") or "Server maintenance"
+    status = container_status()
+    if not status.get("available"):
+        raise RuntimeError(
+            f"อ่านสถานะคอนเทนเนอร์ Palworld ไม่ได้: {status.get('error', 'unknown error')}"
+        )
+    if not status.get("running"):
+        return None
+
+    original_policy = get_restart_policy()
+    update_job(job["id"], restart_policy=original_policy)
+    policy_changed = True
     try:
-        api_request("announce", "POST", {"message": message})
-    except Exception as exc:
-        print(f"Server announcement failed: {exc}")
-    discord_notify(
-        "เริ่มช่วง Maintenance",
-        f"งาน `{job['id']}` ({job['type']})\nประกาศ: {message}\nเซิร์ฟเวอร์จะปิดใน {warning} วินาที",
-        "warning",
-    )
-    if warning > 0:
-        time.sleep(warning)
-    try:
-        api_request("save", "POST")
-    except Exception as exc:
-        print(f"Save before maintenance failed; Docker graceful stop will still be attempted: {exc}")
+        set_restart_policy({"Name": "no", "MaximumRetryCount": 0})
+
+        try:
+            api_request("save", "POST")
+        except Exception as exc:
+            print(f"Save before shutdown warning failed: {exc}")
+
+        api_request(
+            "shutdown",
+            "POST",
+            {
+                "waittime": warning,
+                "message": message,
+            },
+        )
+        discord_notify(
+            "เริ่มช่วง Maintenance",
+            f"งาน `{job['id']}` ({job['type']})\nประกาศ: {message}\nเซิร์ฟเวอร์จะปิดใน {warning} วินาที",
+            "warning",
+        )
+        wait_for_shutdown_completion(warning)
+        return original_policy
+    except Exception:
+        restored = False
+        if policy_changed:
+            try:
+                set_restart_policy(original_policy)
+                restored = True
+            except Exception as restore_exc:
+                print(f"Restore restart policy after shutdown failure failed: {restore_exc}")
+        if restored:
+            try:
+                update_job(job["id"], restart_policy=None)
+            except Exception as state_exc:
+                print(f"Clear persisted restart policy failed: {state_exc}")
+        raise
+
+
+def restore_job_restart_policy(job_id, policy):
+    if policy is None:
+        return
+    set_restart_policy(policy)
+    update_job(job_id, restart_policy=None)
 
 
 def run_export_job(job):
-    update_job(job["id"], stage="announcing")
-    set_maintenance_marker(job, "announcing")
-    announce_and_wait(job)
-    update_job(job["id"], stage="stopping_server")
-    set_maintenance_marker(job, "stopping_server")
-    stop_container()
-    discord_notify("เซิร์ฟเวอร์ปิดชั่วคราว", f"งาน `{job['id']}` กำลัง Export ข้อมูล", "warning")
-    update_job(job["id"], stage="creating_archive")
-    set_maintenance_marker(job, "creating_archive")
-    output = create_export_archive("palworld-export", job["id"])
-    discord_notify(
-        "สร้างไฟล์ Export แล้ว",
-        f"งาน `{job['id']}`\nไฟล์: `{output.name}`\nกำลังเปิดเซิร์ฟเวอร์กลับ",
-        "info",
-    )
-    update_job(job["id"], output_file=output.name, stage="starting_server")
-    set_maintenance_marker(job, "starting_server")
-    start_container()
-    wait_for_server_ready()
-    size = output.stat().st_size
-    discord_notify(
-        "Export เสร็จและเปิดเซิร์ฟเวอร์แล้ว",
-        f"งาน `{job['id']}`\nไฟล์: `{output.name}`\nขนาด: {size / 1024 / 1024:.2f} MB",
-        "success",
-    )
+    original_policy = None
+    try:
+        update_job(job["id"], stage="announcing")
+        set_maintenance_marker(job, "announcing")
+        original_policy = shutdown_for_maintenance(job)
+
+        update_job(job["id"], stage="stopping_server")
+        set_maintenance_marker(job, "stopping_server")
+        if container_status().get("running"):
+            stop_container()
+        discord_notify("เซิร์ฟเวอร์ปิดชั่วคราว", f"งาน `{job['id']}` กำลัง Export ข้อมูล", "warning")
+
+        update_job(job["id"], stage="creating_archive")
+        set_maintenance_marker(job, "creating_archive")
+        output = create_export_archive("palworld-export", job["id"])
+        discord_notify(
+            "สร้างไฟล์ Export แล้ว",
+            f"งาน `{job['id']}`\nไฟล์: `{output.name}`\nกำลังเปิดเซิร์ฟเวอร์กลับ",
+            "info",
+        )
+
+        update_job(job["id"], output_file=output.name, stage="starting_server")
+        set_maintenance_marker(job, "starting_server")
+        restore_job_restart_policy(job["id"], original_policy)
+        original_policy = None
+        start_container()
+        wait_for_server_ready()
+
+        size = output.stat().st_size
+        discord_notify(
+            "Export เสร็จและเปิดเซิร์ฟเวอร์แล้ว",
+            f"งาน `{job['id']}`\nไฟล์: `{output.name}`\nขนาด: {size / 1024 / 1024:.2f} MB",
+            "success",
+        )
+    finally:
+        if original_policy is not None:
+            try:
+                restore_job_restart_policy(job["id"], original_policy)
+            except Exception as exc:
+                print(f"Restore restart policy after export failed: {exc}")
 
 
 def run_import_job(job):
     source_name = safe_filename(job.get("source_file", ""), ".zip")
     source = IMPORT_DIR / source_name
     validate_import_archive(source)
-    update_job(job["id"], stage="announcing")
-    set_maintenance_marker(job, "announcing")
-    announce_and_wait(job)
-    update_job(job["id"], stage="stopping_server")
-    set_maintenance_marker(job, "stopping_server")
-    stop_container()
-    discord_notify("เซิร์ฟเวอร์ปิดชั่วคราว", f"งาน `{job['id']}` กำลัง Import `{source.name}`", "warning")
 
-    update_job(job["id"], stage="safety_backup")
-    set_maintenance_marker(job, "safety_backup")
-    safety_backup = create_export_archive("pre-import", job["id"])
-    update_job(job["id"], safety_backup=safety_backup.name)
-    discord_notify(
-        "สร้าง Safety Backup แล้ว",
-        f"งาน `{job['id']}`\nไฟล์: `{safety_backup.name}`\nกำลังตรวจสอบและนำเข้าข้อมูลใหม่",
-        "info",
-    )
-
+    original_policy = None
     staging_root = STAGING_DIR / f"import-{job['id']}"
     rollback_saved = PALWORLD_DATA_DIR / f".dashboard-rollback-saved-{job['id']}"
     imported = False
     old_moved = False
+
     if staging_root.exists():
         shutil.rmtree(staging_root)
     if rollback_saved.exists():
         shutil.rmtree(rollback_saved)
+
     try:
+        update_job(job["id"], stage="announcing")
+        set_maintenance_marker(job, "announcing")
+        original_policy = shutdown_for_maintenance(job)
+
+        update_job(job["id"], stage="stopping_server")
+        set_maintenance_marker(job, "stopping_server")
+        if container_status().get("running"):
+            stop_container()
+        discord_notify("เซิร์ฟเวอร์ปิดชั่วคราว", f"งาน `{job['id']}` กำลัง Import `{source.name}`", "warning")
+
+        update_job(job["id"], stage="safety_backup")
+        set_maintenance_marker(job, "safety_backup")
+        safety_backup = create_export_archive("pre-import", job["id"])
+        update_job(job["id"], safety_backup=safety_backup.name)
+        discord_notify(
+            "สร้าง Safety Backup แล้ว",
+            f"งาน `{job['id']}`\nไฟล์: `{safety_backup.name}`\nกำลังตรวจสอบและนำเข้าข้อมูลใหม่",
+            "info",
+        )
+
         update_job(job["id"], stage="extracting")
         set_maintenance_marker(job, "extracting")
         extracted_saved = extract_import_archive(source, staging_root)
@@ -632,6 +779,8 @@ def run_import_job(job):
 
         update_job(job["id"], stage="starting_server")
         set_maintenance_marker(job, "starting_server")
+        restore_job_restart_policy(job["id"], original_policy)
+        original_policy = None
         start_container()
         wait_for_server_ready()
 
@@ -664,6 +813,11 @@ def run_import_job(job):
                 print(f"Rollback failed: {rollback_exc}")
         raise
     finally:
+        if original_policy is not None:
+            try:
+                restore_job_restart_policy(job["id"], original_policy)
+            except Exception as exc:
+                print(f"Restore restart policy after import failed: {exc}")
         if staging_root.exists():
             shutil.rmtree(staging_root, ignore_errors=True)
 
@@ -682,15 +836,27 @@ def run_job(job):
         except Exception as exc:
             message = str(exc)
             print(f"Maintenance job {job['id']} failed: {message}")
-            recovery = ""
+            recovery_parts = []
+
+            latest = get_job(job["id"]) or {}
+            persisted_policy = latest.get("restart_policy")
+            if isinstance(persisted_policy, dict):
+                try:
+                    restore_job_restart_policy(job["id"], persisted_policy)
+                    recovery_parts.append("คืนค่า Restart Policy แล้ว")
+                except Exception as policy_exc:
+                    recovery_parts.append(f"คืนค่า Restart Policy ไม่สำเร็จ: {policy_exc}")
+
             try:
                 status = container_status()
                 if not status.get("running"):
                     start_container()
                     wait_for_server_ready(timeout_seconds=min(START_TIMEOUT_SECONDS, 600))
-                    recovery = " ระบบเปิดเซิร์ฟเวอร์กลับได้แล้ว"
+                    recovery_parts.append("เปิดเซิร์ฟเวอร์กลับได้แล้ว")
             except Exception as recovery_exc:
-                recovery = f" เปิดเซิร์ฟเวอร์กลับอัตโนมัติไม่สำเร็จ: {recovery_exc}"
+                recovery_parts.append(f"เปิดเซิร์ฟเวอร์กลับอัตโนมัติไม่สำเร็จ: {recovery_exc}")
+
+            recovery = " " + " | ".join(recovery_parts) if recovery_parts else ""
             update_job(job["id"], status="failed", stage="failed", finished_at=iso_now(), error=message + recovery)
             set_maintenance_marker(job, "failed")
             discord_notify(
@@ -703,6 +869,7 @@ def run_job(job):
 def scheduler_loop():
     time.sleep(3)
     interrupted = []
+    interrupted_policies = []
     with STATE_LOCK:
         for job in STATE["jobs"]:
             if job.get("status") == "running":
@@ -711,9 +878,16 @@ def scheduler_loop():
                 job["finished_at"] = iso_now()
                 job["error"] = "Dashboard ถูกรีสตาร์ตระหว่างทำงาน กรุณาตรวจสอบข้อมูลและสถานะเซิร์ฟเวอร์"
                 interrupted.append(job["id"])
+                if isinstance(job.get("restart_policy"), dict):
+                    interrupted_policies.append((job["id"], dict(job["restart_policy"])))
         if interrupted:
             save_state()
     if interrupted:
+        for job_id, policy in interrupted_policies:
+            try:
+                restore_job_restart_policy(job_id, policy)
+            except Exception as exc:
+                print(f"Interrupted job {job_id} could not restore restart policy: {exc}")
         try:
             if not container_status().get("running"):
                 start_container()
