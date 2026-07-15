@@ -1,4 +1,4 @@
-# Palworld Server Dashboard
+# Palworld Server Dashboard Thai
 
 ชุด Docker Compose สำหรับติดตั้ง **Palworld Dedicated Server พร้อม Dashboard ผู้ดูแล** โดยเอกสารและหน้าจอหลักเป็นภาษาไทย รองรับการดูสถานะเซิร์ฟเวอร์ จัดการผู้เล่น Ban/Unban สั่งงานผู้ดูแล ตั้งคิว Import/Export พร้อม Safety Backup และโหลด World Actor Snapshot ผ่าน GameData API
 
@@ -293,3 +293,23 @@ Pal/
 ---
 
 เอกสารปรับปรุงสำหรับชุด ณ วันที่ 15 กรกฎาคม 2026
+
+## [TH] เครดิตและแหล่งอ้างอิง
+
+โปรเจกต์นี้ได้รับการพัฒนาต่อยอดและอ้างอิงโครงสร้างพื้นฐานมาจากโปรเจกต์ต้นแบบ โดยมีรายละเอียดดังนี้:
+
+* **Docker Image และไฟล์ตั้งค่า (.env)**: อ้างอิงและดึงซอร์สโค้ดหลักมาจากผู้พัฒนาต้นฉบับ
+* **ผู้พัฒนาต้นฉบับ**: [@thijsvanloef](https://github.com/thijsvanloef)
+* **ลิงก์โปรเจกต์ต้นแบบ**: [palworld-server-docker](https://github.com/thijsvanloef/palworld-server-docker)
+
+*ขอขอบคุณผู้พัฒนาต้นฉบับสำหรับการดูแลรักษาระบบ Docker Image และโครงสร้างไฟล์ตั้งค่าต่างๆ*
+
+## [EN] Credits & Technical References
+
+This project heavily relies on and references the infrastructure provided by the original creator:
+
+* **Base Docker Image & Environment Configurations**: Inherited and customized from the upstream repository.
+* **Original Creator**: [@thijsvanloef](https://github.com/thijsvanloef)
+* **Original Repository**: [palworld-server-docker](https://github.com/thijsvanloef/palworld-server-docker)
+
+*Special thanks to the original author for maintaining the base images and configuration templates.*
