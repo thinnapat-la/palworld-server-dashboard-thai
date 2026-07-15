@@ -43,13 +43,7 @@
 
 ## ติดตั้งแบบเร็ว
 
-### 1. แตกไฟล์และเข้าโฟลเดอร์
-
-```bash
-unzip palworld-dashboard.zip
-```
-
-### 2. ตั้งค่า `.env`
+### 1. ตั้งค่า `.env`
 
 ไฟล์ชุดนี้มี `.env.example` ให้ใช้เป็นต้นแบบ:
 
@@ -75,24 +69,32 @@ DISCORD_WELCOME_WEBHOOK_URL=
 DISCORD_SESSION_WEBHOOK_URL=
 DISCORD_INVITE_URL=
 ```
+### ตั้ง Discord (กรณีต้องการแจ้งเตือน)
 
-### 3. เปิด GameData API สำหรับ World Actor Snapshot
+#### ขั้นตอนการสร้าง Discord Webhook URL 
+```dotenv
+[ชื่อเซิร์ฟเวอร์] → [Server Settings] → [Integrations] → [Webhooks] → [New Webhook] → [Copy Webhook URL]
+```
 
-เตรียมตัวแปรนี้ไว้แล้ว:
+หากใช้งาน ให้สร้าง Webhook แยกตามช่อง:
+```dotenv
+DISCORD_INFORMATION_WEBHOOK_URL=https://discord.com/api/webhooks/ID/TOKEN
+DISCORD_SESSION_WEBHOOK_URL=https://discord.com/api/webhooks/ID/TOKEN
+DISCORD_INVITE_URL=https://discord.gg/INVITE
+```
+
+`discord.gg` เป็น Invite Link ไม่ใช่ Webhook URL
+
+หากไม่ใช้ Discord:
 
 ```dotenv
-ENABLE_GAMEDATA_API=true
+DISCORD_INFORMATION_WEBHOOK_URL=
+DISCORD_SESSION_WEBHOOK_URL=
+DISCORD_WELCOME_WEBHOOK_URL=
+DISCORD_INVITE_URL=
 ```
 
-และ Compose ส่งเข้า Palworld container ดังนี้:
-
-```yaml
-ENABLE_GAMEDATA_API: "${ENABLE_GAMEDATA_API:-true}"
-```
-
-ฟังก์ชันนี้ต้องใช้อิมเมจ `thijsvanloef/palworld-server-docker` รุ่น **2.6.0 หรือใหม่กว่า** จึงควร Pull อิมเมจใหม่ก่อนสร้างคอนเทนเนอร์
-
-### 4. สร้างโฟลเดอร์ข้อมูลและเปิดระบบ
+### 2. สร้างโฟลเดอร์ข้อมูลและเปิดระบบ
 
 ```bash
 mkdir -p dashboard/data/exports dashboard/data/imports
@@ -109,7 +111,7 @@ docker compose logs -f palworld dashboard docker-proxy
 
 การติดตั้งหรืออัปเดต Palworld ครั้งแรกอาจใช้เวลาหลายนาทีตามความเร็วเครือข่ายและดิสก์
 
-### 5. เปิด Dashboard
+### 3. เปิด Dashboard
 
 ```text
 http://SERVER_IP:8080
@@ -137,6 +139,22 @@ curl http://127.0.0.1:8080/health
 ```text
 ok v1.0.0
 ```
+
+### [optional] เปิด GameData API สำหรับ World Actor Snapshot
+
+เตรียมตัวแปรนี้ไว้แล้ว:
+
+```dotenv
+ENABLE_GAMEDATA_API=true
+```
+
+และ Compose ส่งเข้า Palworld container ดังนี้:
+
+```yaml
+ENABLE_GAMEDATA_API: "${ENABLE_GAMEDATA_API:-true}"
+```
+
+ฟังก์ชันนี้ต้องใช้อิมเมจ `thijsvanloef/palworld-server-docker` รุ่น **2.6.0 หรือใหม่กว่า** จึงควร Pull อิมเมจใหม่ก่อนสร้างคอนเทนเนอร์
 
 ตรวจว่า GameData API ถูกส่งเข้า Container:
 
@@ -176,6 +194,9 @@ docker compose logs -f palworld
 ## คำสั่งใช้งานประจำ
 
 ```bash
+# เริ่ม Project ทั้งหมด
+docker compose up -d
+
 # ดูสถานะ
 docker compose ps
 
@@ -195,11 +216,11 @@ docker compose up -d --force-recreate palworld
 # Build Dashboard ใหม่หลังแก้ server.py/index.html
 docker compose up -d --build dashboard
 
-# ปิดระบบทั้งหมด
+# ปิดระบบทั้งหมดโดยไม่ลบ Volume bind mount
 docker compose down
 
-# ปิดโดยไม่ลบ Volume bind mount
-docker compose down
+# ปิดระบบทั้งหมดโดยลบ Volume bind mount
+docker compose down -v
 ```
 
 ## หลักการ Import/Export

@@ -192,13 +192,7 @@ sudo ufw status numbered
 
 # ภาค 3: การติดตั้ง
 
-## 3.1 แตกแพ็กเกจ
-
-```bash
-unzip palworld-dashboard.zip
-```
-
-## 3.2 เตรียม `.env`
+## 3.1 เตรียม `.env`
 
 หากไม่มี `.env`:
 
@@ -228,7 +222,10 @@ DASHBOARD_PASSWORD=CHANGE_ME_DASHBOARD_PASSWORD
 - หลีกเลี่ยงช่องว่างท้ายบรรทัด
 - ห้าม Commit `.env`
 
-## 3.3 ตั้ง Discord
+## 3.2 ตั้ง Discord
+
+### ขั้นตอนการสร้าง Discord Webhook URL 
+[ชื่อเซิร์ฟเวอร์] → [Server Settings] → [Integrations] → [Webhooks] → [New Webhook] → [Copy Webhook URL]
 
 หากใช้งาน ให้สร้าง Webhook แยกตามช่อง:
 
@@ -250,7 +247,59 @@ DISCORD_WELCOME_WEBHOOK_URL=
 DISCORD_INVITE_URL=
 ```
 
-## 3.4 เปิด World Actor Snapshot / GameData API
+## 3.3 สร้างโฟลเดอร์
+
+```bash
+mkdir -p dashboard/data/exports dashboard/data/imports
+mkdir -p palworld
+```
+
+ตรวจสิทธิ์:
+
+```bash
+sudo chown -R 1000:1000 palworld dashboard/data
+```
+
+เปลี่ยน `1000:1000` ตาม UID/GID จริง
+
+## 3.4 Pull และ Start
+
+```bash
+docker compose pull palworld docker-proxy
+docker compose up -d --build
+```
+
+ตรวจ:
+
+```bash
+docker compose ps
+docker compose logs -f --tail=200
+```
+
+## 3.5 ตรวจสุขภาพ
+
+```bash
+curl http://127.0.0.1:8080/health
+```
+
+ตรวจ REST API จาก Host:
+
+```bash
+curl -u 'admin:PALWORLD_ADMIN_PASSWORD' \
+  http://127.0.0.1:8212/v1/api/info
+```
+
+แทน `PALWORLD_ADMIN_PASSWORD` ด้วยค่าจริง ระวัง Shell history
+
+## 3.6 เปิดหน้า Dashboard
+
+```text
+http://SERVER_IP:8080
+```
+
+หากใช้ Reverse Proxy ให้ตั้ง `DASHBOARD_BIND_ADDRESS=127.0.0.1` และ Proxy เข้า `127.0.0.1:8080`
+
+## [optional] เปิด World Actor Snapshot / GameData API
 
 กำหนด:
 
@@ -267,58 +316,6 @@ ENABLE_GAMEDATA_API: "${ENABLE_GAMEDATA_API:-true}"
 ตัวแปรนี้มีใน `thijsvanloef/palworld-server-docker` ตั้งแต่รุ่น `2.6.0` และทำให้ startup เปิด GameData Bridge สำหรับคำสั่ง `game-data`
 
 > การตั้ง `REST_API_ENABLED=true` อย่างเดียวไม่เพียงพอสำหรับ `/v1/api/game-data`
-
-## 3.5 สร้างโฟลเดอร์
-
-```bash
-mkdir -p dashboard/data/exports dashboard/data/imports
-mkdir -p palworld
-```
-
-ตรวจสิทธิ์:
-
-```bash
-sudo chown -R 1000:1000 palworld dashboard/data
-```
-
-เปลี่ยน `1000:1000` ตาม UID/GID จริง
-
-## 3.6 Pull และ Start
-
-```bash
-docker compose pull palworld docker-proxy
-docker compose up -d --build
-```
-
-ตรวจ:
-
-```bash
-docker compose ps
-docker compose logs -f --tail=200
-```
-
-## 3.7 ตรวจสุขภาพ
-
-```bash
-curl http://127.0.0.1:8080/health
-```
-
-ตรวจ REST API จาก Host:
-
-```bash
-curl -u 'admin:PALWORLD_ADMIN_PASSWORD' \
-  http://127.0.0.1:8212/v1/api/info
-```
-
-แทน `PALWORLD_ADMIN_PASSWORD` ด้วยค่าจริง ระวัง Shell history
-
-## 3.8 เปิดหน้า Dashboard
-
-```text
-http://SERVER_IP:8080
-```
-
-หากใช้ Reverse Proxy ให้ตั้ง `DASHBOARD_BIND_ADDRESS=127.0.0.1` และ Proxy เข้า `127.0.0.1:8080`
 
 ---
 
