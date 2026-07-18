@@ -5,3 +5,12 @@ dashboard/data/*
 !dashboard/data/.gitkeep
 __pycache__/
 *.pyc
+.env.host
+host-palworld/
+runtime/control/*
+!runtime/control/.gitkeep
+migration-backups/
+volume-backups/
+runtime/steamcmd-windows/
+runtime/logs/
+runtime/config-backups/
