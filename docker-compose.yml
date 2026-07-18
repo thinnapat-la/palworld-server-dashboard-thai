@@ -4,15 +4,24 @@
 # ให้สร้าง Webhook ใน Discord: Edit Channel > Integrations > Webhooks > New Webhook > Copy Webhook URL
 # แนะนำให้เก็บรหัสผ่านและ Webhook URL ไว้ในไฟล์ .env หรือ Docker Secret หากเปิดเผย Compose ให้ผู้อื่น
 #
+# ใช้ local logging driver พร้อม rotation เพื่อลดการโตของไฟล์ Log บน Host
+x-default-logging: &default-logging
+  driver: local
+  options:
+    max-size: "${DOCKER_LOG_MAX_SIZE:-20m}"
+    max-file: "${DOCKER_LOG_MAX_FILE:-3}"
+
 services:
   palworld:
     image: thijsvanloef/palworld-server-docker:latest # อิมเมจ Palworld Server รุ่นล่าสุด
     container_name: palworld-server # ชื่อคอนเทนเนอร์สำหรับใช้อ้างอิงในคำสั่ง Docker
     restart: unless-stopped # ให้คอนเทนเนอร์เริ่มใหม่อัตโนมัติยกเว้นสั่งหยุดเอง
     stop_grace_period: 30s # เวลารอให้เซิร์ฟเวอร์บันทึกข้อมูลและปิดอย่างปลอดภัย
+    logging: *default-logging # จำกัดขนาด Log ของคอนเทนเนอร์ด้วย local driver
+    mem_reservation: "${PALWORLD_MEMORY_RESERVATION:-8g}" # Soft reservation ให้ Palworld โดยไม่บังคับ Hard limit
 
     healthcheck:
-      test: ["CMD-SHELL", "pgrep -f PalServer-Linux-Test >/dev/null || exit 1"]
+      test: ["CMD-SHELL", "pgrep -f 'PalServer-Linux-(Shipping|Test)' >/dev/null || exit 1"]
       interval: 30s
       timeout: 10s
       retries: 5
@@ -27,15 +36,17 @@ services:
 
     # ==================== ที่เก็บข้อมูลถาวร ====================
     volumes:
-      - ./palworld:/palworld/ # เก็บไฟล์เกม เซฟ Config และ Backup ไว้ข้างเครื่อง Host
+      - palworld-data:/palworld/ # Named Volume ลด I/O ผ่าน bind mount และแยกข้อมูลออกจากอายุคอนเทนเนอร์
 
     environment:
       # ==================== ระบบพื้นฐานและสิทธิ์ไฟล์ ====================
       TZ: "Asia/Bangkok" # เขตเวลาที่ใช้กับ Log Backup Update และ Reboot
       PUID: "1000" # UID ของผู้ใช้บน Host ที่ให้เป็นเจ้าของไฟล์ ห้ามใช้ 0
       PGID: "1000" # GID ของกลุ่มบน Host ที่ให้เป็นเจ้าของไฟล์ ห้ามใช้ 0
-      UPDATE_ON_BOOT: "true" # ติดตั้งหรืออัปเดตเซิร์ฟเวอร์เมื่อเริ่มคอนเทนเนอร์ ต้องเปิดครั้งแรก
-      MULTITHREADING: "true" # เปิดโหมดประมวลผลหลายเธรด เหมาะกับ CPU ตั้งแต่ประมาณ 4 เธรด
+      UPDATE_ON_BOOT: "${PALWORLD_UPDATE_ON_BOOT:-false}" # เปิด true เฉพาะ First init หรือรอบที่ต้องการอัปเดตเกม
+      MULTITHREADING: "false" # Deprecated; ใช้ ENABLE_PERF_THREADING_ARGS แทน
+      ENABLE_PERF_THREADING_ARGS: "${PALWORLD_ENABLE_PERF_THREADING_ARGS:-true}" # ใช้ args มาตรฐาน -useperfthreads -NoAsyncLoadingThread -UseMultithreadForDS
+      WORKER_THREADS_SERVER: "${PALWORLD_WORKER_THREADS_SERVER:-}" # เว้นว่างให้เกมเลือกจำนวน Worker เอง ลดความเสี่ยง thread contention
       USE_DEPOT_DOWNLOADER: "false" # ใช้ DepotDownloader แทน SteamCMD เหมาะกับเครื่องที่ SteamCMD ไม่รองรับ
       INSTALL_BETA_INSIDER: "false" # ติดตั้ง Palworld Dedicated Server รุ่น Beta Insider
       TARGET_MANIFEST_ID: "" # ล็อกเวอร์ชันเกมด้วย Steam Manifest ID เว้นว่างเพื่อใช้รุ่นล่าสุด
@@ -62,13 +73,13 @@ services:
       REST_API_ENABLED: "true" # เปิด REST API สำหรับคำสั่งและระบบตรวจผู้เล่น
       REST_API_PORT: "8212" # พอร์ต TCP ของ REST API ไม่ควรเปิดสู่สาธารณะ
       ENABLE_GAMEDATA_API: "${ENABLE_GAMEDATA_API:-true}" # เปิด GET /v1/api/game-data สำหรับ World Actor Snapshot; ต้องใช้อิมเมจ 2.6.0 ขึ้นไป
-      ENABLE_PLAYER_LOGGING: "true" # บันทึกและแจ้งผู้เล่นเข้าออก ต้องเปิด REST API
-      PLAYER_LOGGING_POLL_PERIOD: "15" # รอบตรวจรายชื่อผู้เล่นเข้าออกเป็นวินาที
-      LOG_FILTER_ENABLED: "true" # กรองบรรทัด Log ซ้ำเพื่อลดความรก
+      ENABLE_PLAYER_LOGGING: "${ENABLE_PLAYER_LOGGING:-false}" # เปิดเฉพาะเมื่อจำเป็น เพื่อลด polling ภายในคอนเทนเนอร์
+      PLAYER_LOGGING_POLL_PERIOD: "${PLAYER_LOGGING_POLL_PERIOD:-60}" # รอบตรวจรายชื่อผู้เล่นเข้าออกเป็นวินาที
+      LOG_FILTER_ENABLED: "${LOG_FILTER_ENABLED:-false}" # false ปิด pal_logger.py และส่ง Log ตรงเข้า Docker logging driver
       LOG_FORMAT_TYPE: "default" # รูปแบบ Log เลือก json logfmt colored plain หรือ default
 
       # ==================== การสำรองข้อมูล ====================
-      BACKUP_ENABLED: "true" # เปิดการสำรองข้อมูลอัตโนมัติ
+      BACKUP_ENABLED: "${BACKUP_ENABLED:-true}" # เปิด/ปิด Auto Backup ผ่าน .env
       BACKUP_CRON_EXPRESSION: "0 0 * * *" # ตาราง Backup แบบ Cron ค่าเดิมคือทุกวันเที่ยงคืน
       USE_BACKUP_SAVE_DATA: "true" # ใช้ระบบ Native Save Data Backup ของเกม
       DELETE_OLD_BACKUPS: "true" # ลบ Backup ที่เก่ากว่าจำนวนวันที่กำหนด
@@ -78,7 +89,7 @@ services:
       AUTO_UPDATE_ENABLED: "false" # เปิดตรวจและอัปเดตเซิร์ฟเวอร์อัตโนมัติ
       AUTO_UPDATE_CRON_EXPRESSION: "0 * * * *" # ตารางตรวจอัปเดตแบบ Cron ค่าเดิมทุกต้นชั่วโมง
       AUTO_UPDATE_WARN_MINUTES: "30" # เวลาประกาศเตือนก่อนอัปเดตเมื่อมีผู้เล่นออนไลน์
-      AUTO_REBOOT_ENABLED: "true" # เปิดรีบูตเซิร์ฟเวอร์อัตโนมัติ
+      AUTO_REBOOT_ENABLED: "${AUTO_REBOOT_ENABLED:-false}" # ปิดเป็นค่าเริ่มต้น ลดงาน cron และหลีกเลี่ยง restart โดยไม่ตั้งใจ
       AUTO_REBOOT_CRON_EXPRESSION: "0 5 * * *" # ตารางรีบูตแบบ Cron ตัวอย่างทุกวันเวลา 05:00
       AUTO_REBOOT_WARN_MINUTES: "10" # เวลาประกาศเตือนผู้เล่นก่อนรีบูต
       AUTO_REBOOT_EVEN_IF_PLAYERS_ONLINE: "false" # บังคับรีบูตแม้ยังมีผู้เล่นออนไลน์
@@ -90,8 +101,8 @@ services:
       AUTO_PAUSE_DEBUG: "false" # แสดง Debug Log ของระบบ Auto Pause
 
       # ==================== การสร้างไฟล์ Config ====================
-      DISABLE_GENERATE_SETTINGS: "false" # ปิดการสร้าง PalWorldSettings.ini จาก Environment เมื่อเป็น true
-      DISABLE_GENERATE_ENGINE: "false" # ให้ระบบสร้าง Engine.ini จาก Environment เพื่อใช้ค่าหมวด Engine ด้านล่าง
+      DISABLE_GENERATE_SETTINGS: "${PALWORLD_DISABLE_GENERATE_SETTINGS:-true}" # existing server ใช้ true; fresh install ให้เริ่ม false หนึ่งครั้งแล้วเปลี่ยนเป็น true
+      DISABLE_GENERATE_ENGINE: "false" # คง Custom Engine.ini แต่ลดเพดาน Frame/Tick เหลือ 60
 
       # ==================== Discord: การแบ่งช่องและ Webhook ====================
       # Invite Link: https://discord.gg/B9wUtyg9s ใช้เชิญสมาชิกเท่านั้น ไม่สามารถนำมาใส่แทน Webhook URL ได้
@@ -103,42 +114,42 @@ services:
 
       # ---------- #information: การเริ่ม ปิด อัปเดต และสำรองข้อมูล ----------
       DISCORD_PRE_UPDATE_BOOT_MESSAGE: "🔄 กำลังอัปเดต Palworld Server กรุณารอสักครู่ | Discord: https://discord.gg/B9wUtyg9s" # ข้อความก่อนเริ่มอัปเดตเกม
-      DISCORD_PRE_UPDATE_BOOT_MESSAGE_ENABLED: "true" # true=แจ้งก่อนอัปเดต; false=ไม่ส่ง
+      DISCORD_PRE_UPDATE_BOOT_MESSAGE_ENABLED: "${DISCORD_SERVER_NOTIFICATIONS_ENABLED:-false}" # true=แจ้งก่อนอัปเดต; false=ไม่ส่ง
       DISCORD_PRE_UPDATE_BOOT_MESSAGE_URL: "${DISCORD_INFORMATION_WEBHOOK_URL:-}" # ส่งข้อความนี้ไป #information; ต้องเป็น Webhook ของช่อง ไม่ใช่ Invite Link
       DISCORD_POST_UPDATE_BOOT_MESSAGE: "✅ อัปเดต Palworld Server เสร็จแล้ว กำลังเปิดให้บริการ" # ข้อความหลังติดตั้งอัปเดตสำเร็จ
-      DISCORD_POST_UPDATE_BOOT_MESSAGE_ENABLED: "true" # เปิดการแจ้งผลหลังอัปเดต
+      DISCORD_POST_UPDATE_BOOT_MESSAGE_ENABLED: "${DISCORD_SERVER_NOTIFICATIONS_ENABLED:-false}" # เปิดการแจ้งผลหลังอัปเดต
       DISCORD_POST_UPDATE_BOOT_MESSAGE_URL: "${DISCORD_INFORMATION_WEBHOOK_URL:-}" # Webhook ช่อง #information
       DISCORD_PRE_START_MESSAGE: "🟡 Palworld Server กำลังเริ่มทำงาน... ภายในอีก 1 นาที" # ข้อความเมื่อ Process เซิร์ฟเวอร์กำลังเริ่ม
-      DISCORD_PRE_START_MESSAGE_ENABLED: "true" # เปิดแจ้งสถานะเริ่มเซิร์ฟเวอร์
+      DISCORD_PRE_START_MESSAGE_ENABLED: "${DISCORD_SERVER_NOTIFICATIONS_ENABLED:-false}" # เปิดแจ้งสถานะเริ่มเซิร์ฟเวอร์
       DISCORD_PRE_START_MESSAGE_URL: "${DISCORD_INFORMATION_WEBHOOK_URL:-}" # Webhook ช่อง #information
       DISCORD_PRE_SHUTDOWN_MESSAGE: "🟠 Palworld Server กำลังปิดเพื่อบันทึกข้อมูล กรุณาออกจากเกมอย่างปลอดภัย" # ข้อความก่อนหยุด Process
-      DISCORD_PRE_SHUTDOWN_MESSAGE_ENABLED: "true" # เปิดแจ้งก่อนปิดเซิร์ฟเวอร์
+      DISCORD_PRE_SHUTDOWN_MESSAGE_ENABLED: "${DISCORD_SERVER_NOTIFICATIONS_ENABLED:-false}" # เปิดแจ้งก่อนปิดเซิร์ฟเวอร์
       DISCORD_PRE_SHUTDOWN_MESSAGE_URL: "${DISCORD_INFORMATION_WEBHOOK_URL:-}" # Webhook ช่อง #information
       DISCORD_POST_SHUTDOWN_MESSAGE: "🔴 Palworld Server ปิดเรียบร้อยแล้ว" # ข้อความหลังหยุดเซิร์ฟเวอร์
-      DISCORD_POST_SHUTDOWN_MESSAGE_ENABLED: "true" # เปิดแจ้งหลังปิดเซิร์ฟเวอร์
+      DISCORD_POST_SHUTDOWN_MESSAGE_ENABLED: "${DISCORD_SERVER_NOTIFICATIONS_ENABLED:-false}" # เปิดแจ้งหลังปิดเซิร์ฟเวอร์
       DISCORD_POST_SHUTDOWN_MESSAGE_URL: "${DISCORD_INFORMATION_WEBHOOK_URL:-}" # Webhook ช่อง #information
       DISCORD_PRE_BACKUP_MESSAGE: "💾 กำลังสำรองข้อมูลโลกและตัวละคร..." # ข้อความก่อนสร้าง Backup
-      DISCORD_PRE_BACKUP_MESSAGE_ENABLED: "true" # เปิดแจ้งก่อน Backup; ปิดได้หาก Backup ถี่และข้อความมากเกินไป
+      DISCORD_PRE_BACKUP_MESSAGE_ENABLED: "${DISCORD_SERVER_NOTIFICATIONS_ENABLED:-false}" # เปิดแจ้งก่อน Backup; ปิดได้หาก Backup ถี่และข้อความมากเกินไป
       DISCORD_PRE_BACKUP_MESSAGE_URL: "${DISCORD_INFORMATION_WEBHOOK_URL:-}" # Webhook ช่อง #information
       DISCORD_POST_BACKUP_MESSAGE: "✅ สำรองข้อมูลเสร็จแล้ว: `file_path`" # file_path จะถูกแทนด้วยตำแหน่งไฟล์ Backup
-      DISCORD_POST_BACKUP_MESSAGE_ENABLED: "true" # เปิดแจ้งหลังสร้าง Backup สำเร็จ
+      DISCORD_POST_BACKUP_MESSAGE_ENABLED: "${DISCORD_SERVER_NOTIFICATIONS_ENABLED:-false}" # เปิดแจ้งหลังสร้าง Backup สำเร็จ
       DISCORD_POST_BACKUP_MESSAGE_URL: "${DISCORD_INFORMATION_WEBHOOK_URL:-}" # Webhook ช่อง #information
       DISCORD_PRE_BACKUP_DELETE_MESSAGE: "🧹 กำลังลบ Backup ที่เก่ากว่า `old_backup_days` วัน" # old_backup_days จะใช้ค่าจาก OLD_BACKUP_DAYS
       DISCORD_PRE_BACKUP_DELETE_MESSAGE_ENABLED: "false" # ตัวอย่างปิดข้อความก่อนลบเพื่อลดข้อความซ้ำ
       DISCORD_PRE_BACKUP_DELETE_MESSAGE_URL: "${DISCORD_INFORMATION_WEBHOOK_URL:-}" # Webhook ช่อง #information
       DISCORD_POST_BACKUP_DELETE_MESSAGE: "🧹 ลบ Backup ที่เก่ากว่า `old_backup_days` วันเรียบร้อยแล้ว" # ข้อความยืนยันหลังลบ Backup เก่า
-      DISCORD_POST_BACKUP_DELETE_MESSAGE_ENABLED: "true" # เปิดแจ้งเมื่อทำความสะอาด Backup เสร็จ
+      DISCORD_POST_BACKUP_DELETE_MESSAGE_ENABLED: "${DISCORD_SERVER_NOTIFICATIONS_ENABLED:-false}" # เปิดแจ้งเมื่อทำความสะอาด Backup เสร็จ
       DISCORD_POST_BACKUP_DELETE_MESSAGE_URL: "${DISCORD_INFORMATION_WEBHOOK_URL:-}" # Webhook ช่อง #information
       DISCORD_ERR_BACKUP_DELETE_MESSAGE: "⚠️ ไม่สามารถลบ Backup เก่าได้ กรุณาตรวจสิทธิ์ไฟล์และค่า OLD_BACKUP_DAYS=`old_backup_days`" # ข้อความ Error เมื่อลบ Backup ไม่สำเร็จ
-      DISCORD_ERR_BACKUP_DELETE_MESSAGE_ENABLED: "true" # ควรเปิดเพื่อให้ผู้ดูแลเห็นปัญหา
+      DISCORD_ERR_BACKUP_DELETE_MESSAGE_ENABLED: "${DISCORD_SERVER_NOTIFICATIONS_ENABLED:-false}" # ควรเปิดเพื่อให้ผู้ดูแลเห็นปัญหา
       DISCORD_ERR_BACKUP_DELETE_MESSAGE_URL: "${DISCORD_INFORMATION_WEBHOOK_URL:-}" # Webhook ช่อง #information
 
       # ---------- #session: ผู้เล่นเข้าและออกจากเกม ----------
       DISCORD_PLAYER_JOIN_MESSAGE: "🟢 `player_name` เข้า Palworld Server แล้ว | ข้อมูลชุมชน: https://discord.gg/B9wUtyg9s" # player_name จะถูกแทนด้วยชื่อผู้เล่น
-      DISCORD_PLAYER_JOIN_MESSAGE_ENABLED: "true" # เปิดข้อความผู้เล่นเข้า; ต้องเปิด REST_API_ENABLED และ ENABLE_PLAYER_LOGGING
+      DISCORD_PLAYER_JOIN_MESSAGE_ENABLED: "${DISCORD_PLAYER_NOTIFICATIONS_ENABLED:-false}" # เปิดข้อความผู้เล่นเข้า; ต้องเปิด REST_API_ENABLED และ ENABLE_PLAYER_LOGGING
       DISCORD_PLAYER_JOIN_MESSAGE_URL: "${DISCORD_SESSION_WEBHOOK_URL:-}" # Webhook ของช่อง #session
       DISCORD_PLAYER_LEAVE_MESSAGE: "⚪ `player_name` ออกจาก Palworld Server แล้ว" # player_name จะถูกแทนด้วยชื่อผู้เล่น
-      DISCORD_PLAYER_LEAVE_MESSAGE_ENABLED: "true" # เปิดข้อความผู้เล่นออก; ต้องเปิด REST API และ Player Logging
+      DISCORD_PLAYER_LEAVE_MESSAGE_ENABLED: "${DISCORD_PLAYER_NOTIFICATIONS_ENABLED:-false}" # เปิดข้อความผู้เล่นออก; ต้องเปิด REST API และ Player Logging
       DISCORD_PLAYER_LEAVE_MESSAGE_URL: "${DISCORD_SESSION_WEBHOOK_URL:-}" # Webhook ของช่อง #session
 
       # ---------- #welcome: ข้อความต้อนรับสมาชิก Discord ----------
@@ -269,19 +280,19 @@ services:
       BUILDING_NAME_DISPLAY_CACHE_TTL_SECONDS: "60" # อายุ Cache ชื่อสิ่งปลูกสร้างเป็นวินาที
 
       # ==================== Engine และ Network Tuning ====================
-      LAN_SERVER_MAX_TICK_RATE: "120" # Tick Rate สูงสุดสำหรับการเชื่อมต่อ LAN
-      NET_SERVER_MAX_TICK_RATE: "120" # Tick Rate สูงสุดสำหรับการเชื่อมต่ออินเทอร์เน็ต
+      LAN_SERVER_MAX_TICK_RATE: "60" # Tick Rate สูงสุดสำหรับการเชื่อมต่อ LAN
+      NET_SERVER_MAX_TICK_RATE: "60" # Tick Rate สูงสุดสำหรับการเชื่อมต่ออินเทอร์เน็ต
       CONFIGURED_INTERNET_SPEED: "104857600" # แบนด์วิดท์อินเทอร์เน็ตสมมติเป็นไบต์ต่อวินาที
       CONFIGURED_LAN_SPEED: "104857600" # แบนด์วิดท์ LAN สมมติเป็นไบต์ต่อวินาที
       MAX_CLIENT_RATE: "104857600" # อัตราส่งข้อมูลสูงสุดต่อ Client
       MAX_INTERNET_CLIENT_RATE: "104857600" # อัตราส่งข้อมูลสูงสุดต่อ Internet Client
       SMOOTH_FRAME_RATE: "true" # เปิดการปรับ Frame Rate ให้เรียบขึ้น
-      SMOOTH_FRAME_RATE_UPPER_LIMIT: "120.000000" # ขอบบนของช่วง Frame Rate ที่ใช้ปรับให้เรียบ
+      SMOOTH_FRAME_RATE_UPPER_LIMIT: "60.000000" # ขอบบนของช่วง Frame Rate ที่ใช้ปรับให้เรียบ
       SMOOTH_FRAME_RATE_LOWER_LIMIT: "30.000000" # ขอบล่างของช่วง Frame Rate ที่ใช้ปรับให้เรียบ
       USE_FIXED_FRAME_RATE: "false" # บังคับใช้ Frame Rate คงที่
-      FIXED_FRAME_RATE: "120.000000" # ค่า Frame Rate คงที่เมื่อเปิดใช้งาน
-      MIN_DESIRED_FRAME_RATE: "60.000000" # Frame Rate ขั้นต่ำที่ Engine พยายามรักษา
-      NET_CLIENT_TICKS_PER_SECOND: "120" # จำนวนรอบอัปเดตข้อมูล Client ต่อวินาที
+      FIXED_FRAME_RATE: "60.000000" # ค่า Frame Rate คงที่หากเปิด USE_FIXED_FRAME_RATE ในอนาคต
+      MIN_DESIRED_FRAME_RATE: "30" # Frame Rate ขั้นต่ำที่ Engine พยายามรักษา
+      NET_CLIENT_TICKS_PER_SECOND: "60" # จำนวนรอบอัปเดตข้อมูล Client ต่อวินาที
 
       # ==================== ARM64 และ Box64 เฉพาะเครื่อง ARM ====================
       ARM64_DEVICE: "generic" # รุ่นอุปกรณ์ ARM64 เลือก generic m1 rpi5 หรือ adlink
@@ -296,9 +307,16 @@ services:
 
   # จำกัดสิทธิ์ Docker API ให้ Dashboard ใช้เฉพาะงานจัดการคอนเทนเนอร์
   docker-proxy:
+    profiles: ["admin"] # เปิดเฉพาะเมื่อสั่ง --profile admin
     image: tecnativa/docker-socket-proxy:latest
     container_name: palworld-docker-proxy
     restart: unless-stopped
+    logging: *default-logging
+    init: true
+    cpus: "${DOCKER_PROXY_CPU_LIMIT:-0.10}"
+    mem_limit: "${DOCKER_PROXY_MEMORY_LIMIT:-64m}"
+    mem_reservation: "${DOCKER_PROXY_MEMORY_RESERVATION:-32m}"
+    pids_limit: ${DOCKER_PROXY_PIDS_LIMIT:-64}
     environment:
       TZ: "Asia/Bangkok"
       LOG_LEVEL: "warning"
@@ -311,14 +329,19 @@ services:
       - default
 
   dashboard:
+    profiles: ["admin"] # เปิดเฉพาะเมื่อสั่ง --profile admin
     image: palworld-dashboard-api:local
     build:
       context: ./dashboard
     container_name: palworld-dashboard
     restart: unless-stopped
+    logging: *default-logging
+    init: true
+    cpus: "${DASHBOARD_CPU_LIMIT:-0.25}"
+    mem_limit: "${DASHBOARD_MEMORY_LIMIT:-256m}"
+    mem_reservation: "${DASHBOARD_MEMORY_RESERVATION:-128m}"
+    pids_limit: ${DASHBOARD_PIDS_LIMIT:-128}
     depends_on:
-      palworld:
-        condition: service_started
       docker-proxy:
         condition: service_started
     ports:
@@ -326,27 +349,33 @@ services:
     environment:
       TZ: "Asia/Bangkok"
       DASHBOARD_TIMEZONE: "Asia/Bangkok"
+      PALWORLD_RUNTIME_MODE: "docker"
+      PALWORLD_RUNTIME_LABEL: "Linux Docker Container"
       PALWORLD_API_URL: "http://palworld:8212/v1/api"
       PALWORLD_ADMIN_PASSWORD: "${PALWORLD_ADMIN_PASSWORD}"
       PALWORLD_CONTAINER_NAME: "palworld-server"
       PALWORLD_DATA_DIR: "/palworld-data"
+      PALWORLD_CONFIG_FILE: "/palworld-data/Pal/Saved/Config/LinuxServer/PalWorldSettings.ini"
       PALWORLD_PUID: "1000"
       PALWORLD_PGID: "1000"
       DOCKER_API_URL: "http://docker-proxy:2375"
       DASHBOARD_DATA_DIR: "/data"
       DASHBOARD_USERNAME: "${DASHBOARD_USERNAME:-admin}"
       DASHBOARD_PASSWORD: "${DASHBOARD_PASSWORD:-CHANGE_ME_DASHBOARD_PASSWORD}"
-      DASHBOARD_REFRESH_SECONDS: "${DASHBOARD_REFRESH_SECONDS:-15}"
+      DASHBOARD_REFRESH_SECONDS: "${DASHBOARD_REFRESH_SECONDS:-30}"
       DASHBOARD_ACTIONS_ENABLED: "${DASHBOARD_ACTIONS_ENABLED:-true}"
       DASHBOARD_DISCORD_WEBHOOK_URL: "${DISCORD_INFORMATION_WEBHOOK_URL:-}"
+      DASHBOARD_DISCORD_NOTIFICATIONS_ENABLED: "${DASHBOARD_DISCORD_NOTIFICATIONS_ENABLED:-false}"
       DASHBOARD_MAX_UPLOAD_MB: "${DASHBOARD_MAX_UPLOAD_MB:-4096}"
       DASHBOARD_MAX_EXPANDED_MB: "${DASHBOARD_MAX_EXPANDED_MB:-8192}"
+      DASHBOARD_MAX_CONFIG_KB: "${DASHBOARD_MAX_CONFIG_KB:-1024}"
+      DASHBOARD_MAX_CONFIG_BACKUPS: "${DASHBOARD_MAX_CONFIG_BACKUPS:-100}"
       PALWORLD_START_TIMEOUT_SECONDS: "${PALWORLD_START_TIMEOUT_SECONDS:-900}"
       PALWORLD_STOP_TIMEOUT_SECONDS: "${PALWORLD_STOP_TIMEOUT_SECONDS:-60}"
     volumes:
       # Dashboard ต้องอ่าน/เขียนข้อมูลเซฟเพื่อสร้าง Export และทำ Import
-      - ./palworld:/palworld-data:rw
-      # เก็บคิวงาน ประวัติ Ban ไฟล์ Import และไฟล์ Export แบบถาวร
+      - palworld-data:/palworld-data:rw
+      # เก็บคิวงาน ประวัติ Kick/Ban/Unban, Config Backup, ไฟล์ Import และไฟล์ Export แบบถาวร
       - ./dashboard/data:/data:rw
       # ผูก source เพื่อแก้ไข Dashboard โดยไม่ต้องกังวล image cache
       - ./dashboard/server.py:/app/server.py:ro
@@ -363,3 +392,7 @@ services:
       retries: 3
       start_period: 30s
 
+# Named Volume หลักของไฟล์เกม Config Save และ Backup
+volumes:
+  palworld-data:
+    name: "${PALWORLD_VOLUME_NAME:-palworld-data}"
