@@ -103,7 +103,7 @@ function Assert-SafeHostPath {
     $projected = Get-ProjectedSavePathLength -HostDir $HostDir
     if ($projected -ge 248) {
         $recommended = Get-DefaultShortHostDir
-        throw "PALWORLD_HOST_DIR ยาวเกินไปสำหรับระบบ Save/Backup ของ Palworld Windows`nHost dir: $HostDir`nProjected backup path: $projected characters`nRecommended: $recommended`nรัน run\windows\09-Move-Server-To-Short-Path.bat เพื่อคัดลอก Server/World ไป path สั้นโดยไม่ลบต้นฉบับ"
+        throw "PALWORLD_HOST_DIR ยาวเกินไปสำหรับระบบ Save/Backup ของ Palworld Windows`nHost dir: $HostDir`nProjected backup path: $projected characters`nRecommended: $recommended`nรัน run\windows\05-Move-Server-To-Short-Path.bat เพื่อคัดลอก Server/World ไป path สั้นโดยไม่ลบต้นฉบับ"
     }
     if ($projected -ge 220) {
         Write-Warning "PALWORLD_HOST_DIR ค่อนข้างยาว (projected backup path $projected characters). แนะนำ path สั้น เช่น $(Get-DefaultShortHostDir)"
@@ -245,7 +245,7 @@ function Install-Or-Update {
     }
 
     if (-not (Test-Path -LiteralPath $paths.Exe)) {
-        throw "Native SteamCMD จบแล้วแต่ไม่พบ $($paths.Exe). ห้ามใช้ Linux SteamCMD container เพื่อดาวน์โหลด Windows depot; ตรวจ Internet/Antivirus และลอง 06-Update.bat อีกครั้ง"
+        throw "Native SteamCMD จบแล้วแต่ไม่พบ $($paths.Exe). ห้ามใช้ Linux SteamCMD container เพื่อดาวน์โหลด Windows depot; ตรวจ Internet/Antivirus และลองรัน 00-Setup.bat อีกครั้งเพื่อ Update/Validate"
     }
     throw "Native SteamCMD ล้มเหลว (exit code $code)"
 }
@@ -312,10 +312,21 @@ function Start-Agent {
 }
 
 function Request-ServerAction {
-    param([ValidateSet("start", "stop")][string]$RequestAction, [hashtable]$Settings)
+    param(
+        [ValidateSet("start", "stop")][string]$RequestAction,
+        [hashtable]$Settings,
+        [switch]$SkipRestShutdown
+    )
     Start-Agent | Out-Null
     $timeout = [int](Get-Setting $Settings "PALWORLD_EXTERNAL_CONTROL_TIMEOUT" "90")
-    & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $RequestScript -Action $RequestAction -TimeoutSeconds $timeout
+    $arguments = @(
+        "-NoProfile", "-ExecutionPolicy", "Bypass",
+        "-File", $RequestScript,
+        "-Action", $RequestAction,
+        "-TimeoutSeconds", $timeout
+    )
+    if ($SkipRestShutdown) { $arguments += "-SkipRestShutdown" }
+    & powershell.exe @arguments
     if ($LASTEXITCODE -ne 0) { throw "Host Agent ทำคำสั่ง $RequestAction ไม่สำเร็จ" }
 }
 
@@ -346,6 +357,101 @@ function Test-Rest {
     }
 }
 
+function Get-PalServerProcess {
+    foreach ($processName in @("PalServer-Win64-Test-Cmd", "PalServer-Win64-Test", "PalServer-Win64-Shipping", "PalServer")) {
+        $process = Get-Process -Name $processName -ErrorAction SilentlyContinue | Select-Object -First 1
+        if ($process) { return $process }
+    }
+    return $null
+}
+
+function Invoke-PalworldRestPost {
+    param(
+        [hashtable]$Settings,
+        [string]$Endpoint,
+        [hashtable]$Body,
+        [int]$TimeoutSeconds = 15
+    )
+    $port = Get-Setting $Settings "PALWORLD_HOST_REST_PORT" "8212"
+    $password = Get-Setting $Settings "PALWORLD_ADMIN_PASSWORD" ""
+    $arguments = @{
+        Method = "Post"
+        Uri = "http://127.0.0.1:$port/v1/api/$Endpoint"
+        Headers = (Get-BasicAuthHeader $password)
+        TimeoutSec = $TimeoutSeconds
+    }
+    if ($Body) {
+        $arguments["ContentType"] = "application/json"
+        $arguments["Body"] = ($Body | ConvertTo-Json -Compress)
+    }
+    Invoke-RestMethod @arguments | Out-Null
+}
+
+function Stop-PalworldGracefully {
+    param([hashtable]$Settings)
+    $process = Get-PalServerProcess
+    if (-not $process) {
+        Write-Host "Palworld Server: stopped already"
+        return
+    }
+
+    $timeout = [Math]::Max(10, [int](Get-Setting $Settings "PALWORLD_HOST_STOP_TIMEOUT_SECONDS" "60"))
+    $shutdownSent = $false
+    if (Test-Rest -Settings $Settings -TimeoutSeconds 3) {
+        Write-Host "Saving World before shutdown..."
+        try {
+            Invoke-PalworldRestPost -Settings $Settings -Endpoint "save" -TimeoutSeconds 20
+            Write-Host "Save World: requested"
+        } catch {
+            Write-Warning "Save World ผ่าน REST ไม่สำเร็จ: $($_.Exception.Message)"
+        }
+        try {
+            Write-Host "Requesting graceful Palworld shutdown (1 second)..."
+            # Palworld 1.0 can reject waittime=0 with HTTP 400. Use one second for
+            # an effectively immediate shutdown while keeping the official JSON contract.
+            Invoke-PalworldRestPost -Settings $Settings -Endpoint "shutdown" -Body @{ waittime = 1; message = "Server stopped by Windows Stop-All" } -TimeoutSeconds 20
+            $shutdownSent = $true
+        } catch {
+            Write-Warning "REST shutdown ไม่สำเร็จ: $($_.Exception.Message)"
+            Write-Host "Trying REST force-stop after Save World..."
+            try {
+                Invoke-PalworldRestPost -Settings $Settings -Endpoint "stop" -TimeoutSeconds 20
+                $shutdownSent = $true
+                Write-Host "REST force-stop: requested"
+            } catch {
+                Write-Warning "REST force-stop ไม่สำเร็จ: $($_.Exception.Message)"
+            }
+        }
+    } else {
+        Write-Warning "REST API offline; จะใช้ Host Agent/process fallback"
+    }
+
+    if (-not $shutdownSent) {
+        try {
+            Request-ServerAction -RequestAction "stop" -Settings $Settings -SkipRestShutdown
+        } catch {
+            Write-Warning $_.Exception.Message
+        }
+    } else {
+        $deadline = (Get-Date).AddSeconds($timeout)
+        while ((Get-Date) -lt $deadline) {
+            if (-not (Get-PalServerProcess)) { break }
+            Start-Sleep -Seconds 1
+        }
+    }
+
+    $remaining = Get-PalServerProcess
+    if ($remaining) {
+        Write-Warning "PalServer ยังไม่หยุดหลังรอ $timeout วินาที; กำลังปิด process tree"
+        & taskkill.exe /PID $remaining.Id /T /F | Out-Null
+        Start-Sleep -Seconds 2
+    }
+    if (Get-PalServerProcess) {
+        throw "หยุด PalServer.exe ไม่สำเร็จ กรุณาเปิด Task Manager และตรวจ Process PalServer"
+    }
+    Write-Host "Palworld Server: stopped"
+}
+
 function Wait-Rest {
     param([hashtable]$Settings)
     $timeout = [int](Get-Setting $Settings "PALWORLD_HOST_START_TIMEOUT_SECONDS" "900")
@@ -363,9 +469,38 @@ function Wait-Rest {
     throw "REST API ยัง Offline หลังรอ $timeout วินาที`nตรวจ AdminPassword/RESTAPIEnabled/Firewall`n--- Pal.log ---`n$tail"
 }
 
+function Start-ServerAndWait {
+    param([hashtable]$Settings)
+    $existing = Get-PalServerProcess
+    if ($existing) {
+        if (Test-Rest -Settings $Settings -TimeoutSeconds 3) {
+            Write-Host "Palworld Server already running and REST API is online"
+            return
+        }
+        Write-Warning "พบ PalServer ทำงานอยู่แต่ REST API ใช้ค่าปัจจุบันไม่ได้ กำลังหยุด process เดิมก่อน Start ใหม่"
+        Stop-PalworldGracefully -Settings $Settings
+    }
+    Request-ServerAction -RequestAction "start" -Settings $Settings
+    Wait-Rest -Settings $Settings
+}
+
 function Start-Dashboard {
     Assert-Docker
-    Invoke-Compose -Arguments @("--profile", "host-admin", "up", "-d", "--build", "dashboard-host") | Out-Null
+    Start-Agent | Out-Null
+
+    # Explicit start handles containers previously stopped by the user. The up
+    # command then creates/reconciles the service when it does not exist or its
+    # Compose configuration changed.
+    Invoke-Compose -Arguments @("--profile", "host-admin", "start", "dashboard-host") -AllowFailure | Out-Null
+    Invoke-Compose -Arguments @("--profile", "host-admin", "up", "-d", "--build", "--remove-orphans", "dashboard-host") | Out-Null
+
+    $containerState = (& docker inspect -f '{{.State.Status}}' palworld-dashboard-host 2>$null | Select-Object -First 1)
+    if ([string]$containerState -ne "running") {
+        & docker start palworld-dashboard-host *> $null
+        if ($LASTEXITCODE -ne 0) {
+            throw "Dashboard container ไม่กลับมาทำงาน ตรวจ Docker Desktop และ docker logs palworld-dashboard-host"
+        }
+    }
 }
 
 function Wait-Dashboard {
@@ -441,9 +576,9 @@ function Relocate-HostToShortPath {
         return
     }
     if (-not (Test-Path -LiteralPath $source)) { throw "ไม่พบ Source server directory: $source" }
-    if (Get-Process -Name "PalServer*" -ErrorAction SilentlyContinue) {
-        Write-Host "Stopping Palworld before copy..."
-        try { Request-ServerAction -RequestAction "stop" -Settings $Settings } catch { Write-Warning $_.Exception.Message }
+    if (Get-PalServerProcess) {
+        Write-Host "Stopping Palworld safely before copy..."
+        Stop-PalworldGracefully -Settings $Settings
     }
     if ((Get-Command docker -ErrorAction SilentlyContinue)) {
         Invoke-Compose -Arguments @("--profile", "host-admin", "down") -AllowFailure | Out-Null
@@ -476,49 +611,106 @@ function Relocate-HostToShortPath {
     Write-Host "Relocation complete. Source เดิมยังอยู่สำหรับ rollback:"
     Write-Host $source
     Write-Host "New PALWORLD_HOST_DIR: $(Convert-ToEnvPath $destination)"
-    Write-Host "Run 01-Start-All.bat แล้วทดสอบ Save ก่อนลบ Source เดิม"
+    Write-Host "Run 01-Start-All.bat แล้วทดสอบเข้า World และ Save ก่อนลบ Source เดิม"
+}
+
+function Invoke-StartAllWorkflow {
+    param([hashtable]$Settings)
+    Write-Host "=== Windows Start All + System Check ==="
+
+    Write-Host "[1/10] Credentials and required settings"
+    Assert-RequiredSettings $Settings
+    Write-Host "OK"
+
+    $paths = Get-HostPaths $Settings
+    Write-Host "[2/10] Safe Windows server path"
+    Assert-SafeHostPath -HostDir $paths.Dir
+    Write-Host "OK - $($paths.Dir)"
+
+    Write-Host "[3/10] Write permission"
+    Assert-HostWritable -HostDir $paths.Dir
+    Write-Host "OK"
+
+    Write-Host "[4/10] Docker Desktop and Compose"
+    Assert-Docker
+    Write-Host "OK"
+
+    Write-Host "[5/10] Native Windows SteamCMD"
+    Ensure-NativeSteamCmd -Settings $Settings
+    Write-Host "OK - $SteamCmdExe"
+
+    Write-Host "[6/10] Palworld server files and configuration"
+    if (-not (Test-Path -LiteralPath $paths.Exe)) {
+        Write-Host "PalServer.exe not found; installing now..."
+        Install-Or-Update -Settings $Settings
+    }
+    Configure-Host
+    Write-Host "OK - $($paths.Exe)"
+
+    Write-Host "[7/10] Windows Host Agent"
+    Start-Agent | Out-Null
+    if (-not (Test-AgentHeartbeat)) { throw "Host Agent เริ่มแล้วแต่ไม่พบ heartbeat" }
+    Write-Host "OK"
+
+    Write-Host "[8/10] Palworld Server and REST API"
+    Start-ServerAndWait -Settings $Settings
+    Write-Host "OK"
+
+    Write-Host "[9/10] Dashboard container and healthcheck"
+    Start-Dashboard
+    Wait-Dashboard -Settings $Settings
+    Write-Host "OK"
+
+    Write-Host "[10/10] Dashboard to Windows REST connectivity"
+    if (-not (Test-DashboardToHostRest -Settings $Settings)) {
+        throw "Host REST API Online แต่ Dashboard container เชื่อมต่อไม่ได้ ตรวจ Windows Firewall/VPN/Endpoint Security และ PALWORLD_HOST_API_HOST"
+    }
+    Write-Host "OK"
+
+    $url = "http://127.0.0.1:$((Get-Setting $Settings 'DASHBOARD_PORT' '8080'))"
+    Write-Host ""
+    Write-Host "All checks passed."
+    Write-Host "Palworld Server: running"
+    Write-Host "Host Agent: running"
+    Write-Host "Dashboard: $url"
+    if (Convert-ToBool (Get-Setting $Settings "PALWORLD_HOST_AUTO_OPEN_DASHBOARD" "true")) { Start-Process $url }
+}
+
+function Stop-AllComponents {
+    param([hashtable]$Settings)
+    Write-Host "=== Stop All ==="
+    Stop-PalworldGracefully -Settings $Settings
+    Stop-Agent
+    Write-Host "Host Agent: stopped"
+
+    if (Get-Command docker -ErrorAction SilentlyContinue) {
+        try {
+            Invoke-Compose -Arguments @("--profile", "host-admin", "stop", "dashboard-host") -AllowFailure | Out-Null
+            Invoke-Compose -Arguments @("--profile", "host-admin", "down", "--remove-orphans") -AllowFailure | Out-Null
+        } catch {
+            Write-Warning $_.Exception.Message
+        }
+        $dashboardState = (& docker inspect -f '{{.State.Status}}' palworld-dashboard-host 2>$null | Select-Object -First 1)
+        if ([string]$dashboardState -eq "running") {
+            & docker stop palworld-dashboard-host *> $null
+        }
+    } else {
+        Write-Warning "ไม่พบ Docker CLI จึงตรวจ/หยุด Dashboard container ไม่ได้"
+    }
+
+    if (Get-PalServerProcess) { throw "Stop-All ตรวจพบ PalServer ยังทำงานอยู่" }
+    if (Get-AgentProcess) { throw "Stop-All ตรวจพบ Host Agent ยังทำงานอยู่" }
+    $finalDashboardState = if (Get-Command docker -ErrorAction SilentlyContinue) { (& docker inspect -f '{{.State.Status}}' palworld-dashboard-host 2>$null | Select-Object -First 1) } else { "unknown" }
+    if ([string]$finalDashboardState -eq "running") { throw "Stop-All ตรวจพบ Dashboard ยังทำงานอยู่" }
+
+    Write-Host "Dashboard: stopped"
+    Write-Host "All Windows Palworld components are stopped."
 }
 
 function Run-Doctor {
     param([hashtable]$Settings)
-    Assert-RequiredSettings $Settings
-    $paths = Get-HostPaths $Settings
-    Write-Host "[1/9] Safe Windows path"
-    Assert-SafeHostPath -HostDir $paths.Dir
-    Write-Host "OK - projected backup path: $(Get-ProjectedSavePathLength -HostDir $paths.Dir) characters"
-    Write-Host "[2/9] Write permission"
-    Assert-HostWritable -HostDir $paths.Dir
-    Write-Host "OK"
-    Write-Host "[3/9] Native Windows SteamCMD"
-    Ensure-NativeSteamCmd -Settings $Settings
-    Write-Host "OK - $SteamCmdExe"
-    Write-Host "[4/9] Docker Desktop (Dashboard only)"
-    Assert-Docker
-    Write-Host "OK"
-    Write-Host "[5/9] Server files"
-    if (-not (Test-Path -LiteralPath $paths.Exe)) { throw "ไม่พบ $($paths.Exe) กรุณารัน 00-Setup.bat หรือ 06-Update.bat" }
-    Write-Host "OK"
-    Write-Host "[6/9] Config"
-    Configure-Host
-    Write-Host "OK"
-    Write-Host "[7/9] Host Agent"
-    Start-Agent | Out-Null
-    Write-Host "OK"
-    Write-Host "[8/9] Host REST API"
-    if (-not (Test-Rest -Settings $Settings)) {
-        Write-Host "Server/REST ยังไม่พร้อม กำลัง Start เพื่อทดสอบ"
-        Request-ServerAction -RequestAction "start" -Settings $Settings
-        Wait-Rest -Settings $Settings
-    }
-    Write-Host "Online"
-    Write-Host "[9/9] Dashboard to Windows REST"
-    Start-Dashboard
-    Wait-Dashboard -Settings $Settings
-    if (Test-DashboardToHostRest -Settings $Settings) {
-        Write-Host "OK - Dashboard container เรียก REST API บน Windows ได้"
-    } else {
-        Write-Warning "Dashboard container เรียก REST ไม่ได้ แต่ Host อาจเรียกได้ ตรวจ Windows Firewall, VPN/EDR และ PALWORLD_HOST_API_HOST"
-    }
+    Write-Host "Doctor ถูกย้ายมารวมใน 01-Start-All.bat แล้ว"
+    Invoke-StartAllWorkflow -Settings $Settings
 }
 
 try {
@@ -526,10 +718,12 @@ try {
     switch ($Action) {
         "setup" {
             Assert-RequiredSettings $settings
+            Write-Host "Preparing Setup/Update: stopping existing Windows Palworld components if needed..."
+            Stop-AllComponents -Settings $settings
             Install-Or-Update -Settings $settings
             Configure-Host
-            Write-Host "Setup complete. Native Windows server files and config are ready."
-            Write-Host "Run 01-Start-All.bat to start PalServer.exe and the Dashboard."
+            Write-Host "Setup/Update complete. Native Windows server files and config are ready."
+            Write-Host "Run 01-Start-All.bat to start and verify PalServer, Host Agent, Dashboard and REST connectivity."
         }
         "configure" {
             Assert-RequiredSettings $settings
@@ -549,33 +743,28 @@ try {
             Assert-HostWritable -HostDir $paths.Dir
             if (-not (Test-Path -LiteralPath $paths.Exe)) { Install-Or-Update -Settings $settings }
             Configure-Host
-            Request-ServerAction -RequestAction "start" -Settings $settings
-            Wait-Rest -Settings $settings
+            Start-ServerAndWait -Settings $settings
         }
         "start-dashboard" {
             Assert-RequiredSettings $settings
-            Start-Dashboard
-            Wait-Dashboard -Settings $settings
-            Write-Host "Dashboard: http://127.0.0.1:$((Get-Setting $settings 'DASHBOARD_PORT' '8080'))"
-        }
-        "start-all" {
-            Assert-RequiredSettings $settings
-            Assert-Docker
             $paths = Get-HostPaths $settings
             Assert-SafeHostPath -HostDir $paths.Dir
             Assert-HostWritable -HostDir $paths.Dir
-            if (-not (Test-Path -LiteralPath $paths.Exe)) { Install-Or-Update -Settings $settings }
-            Configure-Host
-            Request-ServerAction -RequestAction "start" -Settings $settings
-            Wait-Rest -Settings $settings
             Start-Dashboard
             Wait-Dashboard -Settings $settings
-            if (-not (Test-DashboardToHostRest -Settings $settings)) {
-                throw "Host REST API Online แต่ Dashboard container เชื่อมต่อไม่ได้ ตรวจ Windows Firewall/VPN/Endpoint Security และ PALWORLD_HOST_API_HOST"
+            if (Test-Rest -Settings $settings) {
+                if (-not (Test-DashboardToHostRest -Settings $settings)) {
+                    throw "Dashboard เปิดแล้วแต่เชื่อม REST บน Windows ไม่ได้ ตรวจ Firewall และ PALWORLD_HOST_API_HOST"
+                }
+            } else {
+                Write-Warning "Dashboard พร้อมใช้งาน แต่ Palworld Server ยัง Offline สามารถกด Start Runtime จาก Dashboard ได้"
             }
             $url = "http://127.0.0.1:$((Get-Setting $settings 'DASHBOARD_PORT' '8080'))"
             Write-Host "Dashboard: $url"
             if (Convert-ToBool (Get-Setting $settings "PALWORLD_HOST_AUTO_OPEN_DASHBOARD" "true")) { Start-Process $url }
+        }
+        "start-all" {
+            Invoke-StartAllWorkflow -Settings $settings
         }
         "stop-dashboard" {
             Assert-Docker
@@ -591,19 +780,14 @@ try {
             Wait-Rest -Settings $settings
         }
         "stop-all" {
-            try { Request-ServerAction -RequestAction "stop" -Settings $settings } catch { Write-Warning $_.Exception.Message }
-            Stop-Agent
-            if ((Get-Command docker -ErrorAction SilentlyContinue)) {
-                Invoke-Compose -Arguments @("--profile", "host-admin", "down") -AllowFailure | Out-Null
-            }
+            Stop-AllComponents -Settings $settings
         }
         "update" {
             Assert-RequiredSettings $settings
-            try { Request-ServerAction -RequestAction "stop" -Settings $settings } catch { Write-Warning $_.Exception.Message }
+            Stop-PalworldGracefully -Settings $settings
             Install-Or-Update -Settings $settings
             Configure-Host
-            Request-ServerAction -RequestAction "start" -Settings $settings
-            Wait-Rest -Settings $settings
+            Start-ServerAndWait -Settings $settings
         }
         "status" { Show-Status -Settings $settings }
         "logs" { Show-Logs -Settings $settings }

@@ -10,6 +10,8 @@
 
 > **เริ่มครั้งแรกให้อ่านหัวข้อของระบบที่ใช้อยู่เท่านั้น** แล้วกลับมาดูหัวข้อ “คำสั่งประจำวัน” และ “การตั้งค่า” ภายหลัง
 
+> เอกสารนี้ตรงกับแพ็กเกจ **1.1.0 Final** ซึ่งรวม Windows Host-native, Config แบบ 3 ปุ่ม, Restart verification, Import World ID, Safety rollback, Basic Authentication และ Windows shutdown fallback แล้ว
+
 ---
 
 ## สารบัญ
@@ -182,7 +184,9 @@ PALWORLD_HOST_PUBLIC_LOBBY=true
 DASHBOARD_PORT=8080
 ```
 
-> SteamCMD อาจตอบ `Missing configuration` ในรอบแรกแล้วสำเร็จในรอบ retry ถัดไป ให้ดูผลสุดท้ายว่าแสดง `Success! App '2394010' fully installed.` และพบ `PalServer.exe` หรือไม่
+> SteamCMD ครั้งแรกอาจอัปเดตตัวเองมากกว่าหนึ่งรอบ และอาจมีข้อความ `ILocalize::AddFile() failed` ซึ่งโดยทั่วไปไม่ใช่ข้อผิดพลาดของการติดตั้งเกม ให้ดูผลสุดท้ายว่าแสดง `Success! App '2394010' fully installed.` และพบ `PalServer.exe` หรือไม่
+>
+> หากหยุดอยู่หลัง `Waiting for user info...OK` โดยไม่มีบรรทัดใหม่ ไม่มี Network/Disk activity และไม่มีไฟล์เพิ่มเป็นเวลานานกว่า 5–10 นาที ให้ปิดหน้าต่าง Setup ตรวจว่าไม่มี `steamcmd.exe` ค้างใน Task Manager แล้วรัน `00-Setup.bat` ซ้ำ ระบบจะ Validate ต่อจากไฟล์ที่ดาวน์โหลดไว้ ไม่จำเป็นต้องลบ `runtime/steamcmd-windows`
 
 ## 3.4 เปิด Server และ Dashboard
 
@@ -190,16 +194,21 @@ DASHBOARD_PORT=8080
 run\windows\01-Start-All.bat
 ```
 
-ลำดับการทำงาน:
+ลำดับการทำงานและ System Check ในตัว:
 
-1. ตรวจ path และสิทธิ์เขียน
-2. Patch ค่า REST/RCON/Admin จาก `.env.host`
-3. เปิด Host Agent แบบ background
-4. เปิด `PalServer.exe`
-5. รอ REST API Online
-6. Build/Start Dashboard container
-7. ทดสอบ Dashboard → `host.docker.internal` → REST API
-8. เปิด Browser อัตโนมัติ
+1. ตรวจรหัสผ่านและค่าบังคับใน `.env.host`
+2. ตรวจความยาว Path และสิทธิ์เขียน
+3. ตรวจ Docker Desktop และ Docker Compose
+4. ตรวจ Native Windows SteamCMD
+5. ตรวจ `PalServer.exe` และติดตั้งให้อัตโนมัติถ้ายังไม่มี
+6. Patch ค่า REST/RCON/Admin จาก `.env.host`
+7. เปิดและตรวจ Heartbeat ของ Host Agent
+8. เปิด `PalServer.exe` และรอ REST API Online
+9. เปิด Dashboard แม้ Container เคยถูกสั่ง Stop ไว้
+10. ตรวจ Dashboard Health และการเชื่อมต่อจาก Container ไปยัง Windows REST API
+11. เปิด Browser อัตโนมัติ
+
+ดังนั้น Windows ไม่ต้องมีไฟล์ Doctor แยกอีกต่อไป ให้ใช้ `01-Start-All.bat` ทุกครั้งที่กลับมาเปิดระบบ เพราะคำสั่งนี้ทั้ง Start และตรวจระบบครบในรอบเดียว
 
 Dashboard:
 
@@ -209,26 +218,50 @@ http://localhost:8080
 
 ## 3.5 คำสั่ง Windows
 
-| งาน | ไฟล์ |
-|---|---|
-| ติดตั้ง/สร้าง Config | `00-Setup.bat` |
-| เปิด Server + Dashboard | `01-Start-All.bat` |
-| เปิดเฉพาะ Server + Agent | `02-Start-Server.bat` |
-| เปิดเฉพาะ Dashboard | `03-Start-Dashboard.bat` |
-| ดูสถานะ | `04-Status.bat` |
-| ดู Log | `05-Logs.bat` |
-| อัปเดตเกม | `06-Update.bat` |
-| ปิดทั้งหมด | `07-Stop-All.bat` |
-| ตรวจระบบ | `08-Doctor.bat` |
-| ย้ายไป Path สั้น | `09-Move-Server-To-Short-Path.bat` |
+โฟลเดอร์ `run/windows` มีคำสั่งสำหรับผู้ใช้เพียง 6 ไฟล์:
+
+| งาน | ไฟล์ | พฤติกรรม |
+|---|---|---|
+| ติดตั้งหรืออัปเดต | `00-Setup.bat` | หยุด Component เดิมถ้ามี แล้วดาวน์โหลด/Validate ผ่าน SteamCMD และสร้าง Config โดยไม่เปิดระบบกลับ |
+| เปิดทุกอย่างและตรวจระบบ | `01-Start-All.bat` | เปิด Server, Host Agent และ Dashboard พร้อม System Check ครบชุด |
+| เปิดเฉพาะ Server | `02-Start-Server.bat` | เปิด Host Agent, Server และรอ REST API โดยไม่แตะ Dashboard |
+| เปิดเฉพาะ Dashboard | `03-Start-Dashboard.bat` | เปิด Host Agent และ Dashboard แม้ Container เคยถูก Stop ไว้ |
+| ปิดทั้งหมด | `04-Stop-All.bat` | Save World, REST Shutdown 1 วินาที, `/stop` fallback, หยุด Agent และปิด Dashboard พร้อมตรวจผล |
+| ย้าย Server ไป Path สั้น | `05-Move-Server-To-Short-Path.bat` | ใช้แก้ปัญหา Windows Path ยาว โดยคัดลอกข้อมูลไปเช่น `C:/PalServer` และไม่ลบ Source เดิม |
+
+> เมื่อต้องการ Update Palworld Dedicated Server ให้ปิดระบบด้วย `04-Stop-All.bat` แล้วรัน `00-Setup.bat` อีกครั้ง จากนั้นเปิดด้วย `01-Start-All.bat`
 
 ## 3.6 การปิดอย่างปลอดภัย
 
-เมื่อมีผู้เล่นหรือ World กำลังทำงาน ให้ใช้ปุ่ม **Stop Runtime** หรือ Maintenance workflow ใน Dashboard เพราะ Dashboard จะพยายาม Save World และสั่ง REST shutdown ก่อนส่งคำสั่งหยุด Host process
+ใช้:
 
-`07-Stop-All.bat` เหมาะกับการปิดทั้งชุดหลัง Server หยุดแล้ว หรือกรณีฉุกเฉิน ตัว Agent มี fallback เป็นการปิด process tree เมื่อ Server ไม่ออกภายใน timeout
+```text
+run\windows\04-Stop-All.bat
+```
 
-## 3.7 Log ของ Windows
+ลำดับการปิด:
+
+1. ขอ Save World ผ่าน REST API
+2. ส่ง REST Shutdown โดยรอ 1 วินาที (หลีกเลี่ยง HTTP 400 จาก `waittime=0`)
+3. รอ `PalServer.exe` ปิดตาม `PALWORLD_HOST_STOP_TIMEOUT_SECONDS`
+4. ใช้ Host Agent หรือ `taskkill /T /F` เป็น fallback เมื่อเกมไม่ยอมออก
+5. หยุด Host Agent
+6. Stop และ Down `dashboard-host`
+7. ตรวจซ้ำว่า Server, Agent และ Dashboard ไม่ได้ทำงานแล้ว
+
+หากต้องการแจ้งผู้เล่นล่วงหน้า ให้ใช้ **Shutdown Server** หรือ Maintenance workflow ใน Dashboard ก่อน แล้วค่อยใช้ `04-Stop-All.bat` เมื่อถึงเวลาปิดเครื่อง
+
+## 3.7 ดูสถานะและ Log
+
+ไม่มี `.bat` แยกเพื่อลดความสับสน สามารถตรวจจากหน้า Dashboard หรือใช้คำสั่งต่อไปนี้จากโฟลเดอร์โปรเจกต์:
+
+```bat
+powershell -NoProfile -Command "Get-Process PalServer* -ErrorAction SilentlyContinue"
+docker compose --env-file .env.host -f docker-compose.host.yml --profile host-admin ps
+docker logs --tail 200 palworld-dashboard-host
+```
+
+ตำแหน่ง Log:
 
 | Log | ตำแหน่ง |
 |---|---|
@@ -237,29 +270,15 @@ http://localhost:8080
 | Host Agent error | `runtime/logs/host-agent.err.log` |
 | SteamCMD | `runtime/steamcmd-windows/logs/` |
 
-ดูรวมด้วย:
+## 3.8 System Check
+
+System Check รวมอยู่ใน:
 
 ```text
-run\windows\05-Logs.bat
+run\windows\01-Start-All.bat
 ```
 
-## 3.8 ตรวจระบบ
-
-```text
-run\windows\08-Doctor.bat
-```
-
-Doctor ตรวจ:
-
-- Path length
-- Write permission
-- Native SteamCMD
-- Docker Desktop
-- `PalServer.exe`
-- Config
-- Host Agent
-- Host REST API
-- Dashboard เรียก REST API บน Windows ได้หรือไม่
+ตรวจครบทั้ง Path, สิทธิ์เขียน, SteamCMD, Docker Desktop, `PalServer.exe`, Config, Host Agent heartbeat, REST API, Dashboard health และ Dashboard-to-Host REST connectivity
 
 ---
 
@@ -443,14 +462,27 @@ http://localhost:8080
 http://<IP-เครื่อง-Server>:8080
 ```
 
-Login ด้วย:
+Dashboard ใช้ **HTTP Basic Authentication** ของ Browser:
 
 ```text
 Username: DASHBOARD_USERNAME
 Password: DASHBOARD_PASSWORD
 ```
 
-ค่าเริ่มต้น Username คือ `admin`
+ค่าเริ่มต้น Username คือ `admin` และต้องตั้ง `DASHBOARD_PASSWORD` ใน `.env` หรือ `.env.host`
+
+```dotenv
+DASHBOARD_USERNAME=admin
+DASHBOARD_PASSWORD=ตั้งรหัสที่เดายาก
+```
+
+ข้อควรรู้:
+
+- Browser อาจจำรหัสของ `http://127.0.0.1:8080` ไว้ จึงไม่ถาม Login ซ้ำทุกครั้ง
+- ระบบ Basic Auth ไม่มีปุ่ม Logout ในหน้าเว็บ หากต้องการทดสอบ Login ให้เปิด Incognito/InPrivate
+- ถ้า `DASHBOARD_PASSWORD` ว่าง Dashboard จะไม่มีการป้องกัน Login และจะแสดงคำเตือนใน Container log
+- หลังแก้รหัส ให้ Recreate Dashboard container; การ Restart Browser อย่างเดียวไม่เปลี่ยนค่าฝั่ง Server
+- ไม่ควรเปิด Dashboard port `8080`, REST `8212` หรือ RCON `25575` ออก Internet โดยตรง
 
 ## 6.2 เข้าเกม
 
@@ -506,7 +538,7 @@ PALWORLD_DISABLE_GENERATE_SETTINGS=true
 
 ## 7.3 Windows mode: ค่าใดถูก Patch จาก `.env.host`
 
-ทุกครั้งที่ Setup, Start, Update, Restart หรือ Doctor สคริปต์จะตรวจและ Patch ค่าเหล่านี้:
+ทุกครั้งที่ Setup, Start หรือ Restart สคริปต์จะตรวจและ Patch ค่าเหล่านี้:
 
 - `ServerName`
 - `ServerPassword`
@@ -522,12 +554,90 @@ PALWORLD_DISABLE_GENERATE_SETTINGS=true
 
 ## 7.4 การแก้ Config ผ่าน Dashboard
 
-มีสองแบบ:
+มีสองรูปแบบ:
 
 1. **Settings form** — แก้ค่าเป็นรายช่องและสร้าง Backup ก่อนเขียน
 2. **Raw editor** — แก้ `PalWorldSettings.ini` โดยตรง
 
-หลังแก้ค่าที่เกมอ่านตอนเริ่มระบบ ให้เลือก **Save + Restart** หรือสร้าง Restart job
+### Workflow ที่ถูกต้อง
+
+หน้า Config แยกการทำงานเป็น 3 ปุ่ม ไม่รวมคำสั่งเข้าด้วยกัน:
+
+| ปุ่ม | ทำอะไร | ไม่ทำอะไร |
+|---|---|---|
+| **ล้างค่าร่าง** | ยกเลิกค่าที่แก้ใน Browser แต่ยังไม่ได้เขียน | ไม่เปลี่ยนไฟล์และไม่ Restart |
+| **อัปเดตไฟล์** | สร้าง Backup และเขียนค่าร่างลง `PalWorldSettings.ini` | ไม่ Restart Server |
+| **Restart Server** | แจ้งผู้เล่น หยุดและเปิด Server ใหม่ โดยใช้ Config ล่าสุดในไฟล์ | ไม่เขียนค่าร่างอัตโนมัติ |
+
+ลำดับใช้งาน:
+
+```text
+แก้ค่า
+→ กด “เก็บค่า” ของรายการนั้น
+→ กด “อัปเดตไฟล์”
+→ ตรวจว่าแสดง “อัปเดตไฟล์แล้ว ... ค่า — รอ Restart Server”
+→ กด “Restart Server”
+→ รอ Job ตรวจค่าและจบเป็น completed
+```
+
+หลังอัปเดตไฟล์ ปุ่มควรแสดง:
+
+```text
+อัปเดตไฟล์ (0)
+```
+
+เลข `0` หมายถึงไม่มีค่าร่างที่ยังไม่ได้เขียน ส่วนข้อความ:
+
+```text
+อัปเดตไฟล์แล้ว 1 ค่า — รอ Restart Server
+```
+
+หมายถึงค่าในไฟล์ใหม่กว่าค่าที่ Process ปัจจุบันกำลังใช้ ซึ่งเป็นสถานะปกติก่อน Restart
+
+### สถานะ 3 ชั้น
+
+| คอลัมน์ | ความหมาย |
+|---|---|
+| **Server ใช้อยู่** | ค่าจาก REST `GET /settings` ของ Process ที่กำลังรัน |
+| **ในไฟล์** | ค่าจริงใน `PalWorldSettings.ini` ที่จะถูกโหลดหลัง Restart |
+| **ค่าใหม่/ค่าร่าง** | ค่าที่แก้ในหน้าเว็บแต่ยังไม่ได้กดอัปเดตไฟล์ |
+
+ตัวอย่างก่อน Restart:
+
+```text
+PlayerStaminaDecreaceRate
+Server ใช้อยู่: 10
+ในไฟล์: 0
+```
+
+แปลว่าไฟล์ถูกอัปเดตแล้ว แต่ Server ยังต้อง Restart เพื่อโหลดค่า `0`
+
+### Restart verification
+
+Restart job จะทำดังนี้:
+
+1. ล็อกสำเนา `PalWorldSettings.ini` ล่าสุด
+2. ส่งข้อความแจ้งผู้เล่นและนับถอยหลังแบบเดียวกับ Shutdown Server
+3. Save World และหยุด Runtime ให้สนิท
+4. เขียนสำเนา Config ที่ล็อกไว้กลับลงไฟล์ เพื่อป้องกัน Process เดิมเขียนค่ารันไทม์เก่าทับระหว่าง Shutdown
+5. เปิด Server ใหม่และรอ REST API
+6. อ่าน `GET /settings` แล้วเปรียบเทียบค่าที่รอ Restart
+7. ตั้ง Job เป็น `completed` เฉพาะเมื่อค่าที่ Server ใช้ตรงกับค่าในไฟล์
+
+เมื่อผ่านการตรวจ หน้า Config จะโหลดสถานะใหม่อัตโนมัติทุก 2 วินาที ข้อความ **รอ Restart** และตารางค่าที่ต่างจะหายเองโดยไม่ต้องกด Refresh
+
+หากค่าไม่ตรง Job ต้องเป็น `failed` พร้อมระบุชื่อค่า ค่าในไฟล์ และค่าที่ Server ใช้อยู่ ไม่ควรขึ้น `completed`
+
+### เวลา Restart
+
+Restart job แยกเวลาออกเป็น 2 ค่า:
+
+- **เวลาเริ่ม Restart** — เว้นว่างเพื่อเริ่มทันที หรือเลือกวัน/เวลาที่ต้องการ
+- **เวลารอเพื่อแจ้งผู้เล่น** — จำนวนวินาทีก่อนปิด เช่น `0`, `30`, `60` หรือ `300`
+
+หน้า Maintenance แสดง Countdown, เปอร์เซ็นต์, ขั้นตอนปัจจุบัน และเวลาที่อัปเดตล่าสุดแบบสด
+
+> `DenyTechnologyList=`, `DenyTechnologyList=()` และค่า REST `[]` ถือเป็นรายการว่างเหมือนกัน จึงไม่ควรถูกแสดงเป็นความต่างปลอม
 
 ## 7.5 Engine tuning ปัจจุบันใน Docker mode
 
@@ -653,6 +763,20 @@ Workflow:
 
 > **สำคัญ:** โหมดนี้ไม่ได้คัดลอกเพียง `SaveGames` เท่านั้น ระบบจะอ่าน World ID จาก `GameUserSettings.ini` ภายใน ZIP หรือจากโฟลเดอร์ `SaveGames/0/<WorldID>` แล้วแก้ `Config/<ระบบปลายทาง>/GameUserSettings.ini` ค่า `DedicatedServerName` ให้ชี้ไปยัง World ที่นำเข้าอัตโนมัติ หลัง Start จะตรวจซ้ำว่า World ID ตรงและมี `Level.sav` ก่อนตั้ง Job เป็น `completed`
 
+เมื่อประวัติงานแสดงข้อความเช่น:
+
+```text
+Import สำเร็จ Server เปิด World A87F... และพร้อมใช้งาน (พบ Player save 2 ไฟล์)
+```
+
+หมายความว่า:
+
+- Server เปิด World ID ที่นำเข้าจริง
+- พบ `Level.sav` และ REST API พร้อมใช้งาน
+- พบไฟล์ตัวละครใน `Players/` ตามจำนวนที่แจ้ง
+
+ข้อความนี้ยืนยันว่าไฟล์ World/Player อยู่ครบ แต่ไม่สามารถรับประกันว่า Steam/Platform ID ของผู้เล่นจะตรงกับ Player GUID เดิมทุกกรณี หากเข้าแล้วถูกให้สร้างตัวละครใหม่ทั้งที่ World ถูกต้อง ให้ตรวจ Player ID/GUID mapping เพิ่มเติม ไม่ควร Import ซ้ำหรือ Full restore ทับ Config ทันที
+
 ไฟล์ Upload อยู่ใน:
 
 ```text
@@ -691,10 +815,12 @@ BACKUP_ENABLED=true
 ## Windows
 
 ```text
-run\windows\06-Update.bat
+run\windows\04-Stop-All.bat
+run\windows\00-Setup.bat
+run\windows\01-Start-All.bat
 ```
 
-ระบบจะหยุด Server, เรียก Native SteamCMD, Patch Config, Start และรอ REST API
+`00-Setup.bat` ใช้ได้ทั้งติดตั้งครั้งแรกและ Update/Validate เกม ส่วน `01-Start-All.bat` จะเปิดระบบและตรวจความพร้อมทั้งหมดหลังอัปเดต
 
 ## macOS
 
@@ -796,9 +922,10 @@ docker compose --profile admin logs --tail=200 dashboard docker-proxy
 Windows:
 
 ```text
-run\windows\04-Status.bat
-run\windows\08-Doctor.bat
+run\windows\01-Start-All.bat
 ```
+
+คำสั่งนี้เปิดระบบพร้อม System Check และจะแสดงจุดที่ไม่ผ่านทันที
 
 ## REST API Offline
 
@@ -815,7 +942,7 @@ run\windows\08-Doctor.bat
 รันจาก CMD เพื่อเห็น Error:
 
 ```bat
-run\windows\08-Doctor.bat
+run\windows\01-Start-All.bat
 ```
 
 ดู:
@@ -841,7 +968,7 @@ PALWORLD_HOST_DIR=D:/PalServer
 ย้ายด้วย:
 
 ```text
-run\windows\09-Move-Server-To-Short-Path.bat
+run\windows\05-Move-Server-To-Short-Path.bat
 ```
 
 ## World ใหม่หลังย้าย Named Volume
@@ -860,6 +987,49 @@ docker run --rm -v palworld-data:/data alpine:3.20 find /data/Pal/Saved -maxdept
 - ดู Dashboard logs
 - ตรวจ Host Agent ใน Windows
 - ตรวจพื้นที่ Disk ทั้ง World, staging และ Safety Backup
+- ดูขั้นตอนล่าสุดในหน้า Maintenance เช่น `announcing`, `stopping_server`, `starting_server` หรือ `verifying_settings`
+
+## Restart ขึ้น completed แต่ค่าควรเปลี่ยนแล้วยังไม่เปลี่ยน
+
+แพ็กเกจล่าสุดไม่ควรปิด Job เป็น `completed` จนกว่า `GET /settings` จะตรงกับค่าในไฟล์ ให้ตรวจ:
+
+1. หน้า Config คอลัมน์ **ในไฟล์** เป็นค่าที่ต้องการหรือไม่
+2. ก่อน Restart ปุ่ม **อัปเดตไฟล์** ต้องเป็น `(0)`
+3. Job มีขั้นตอนตรวจ Config หลัง REST Online หรือไม่
+4. เปิด Advanced editor ตรวจไฟล์จริง
+5. ตรวจว่า Windows startup patch จาก `.env.host` ไม่ได้เขียนทับค่านั้น
+6. ตรวจ `WorldOption.sav` ตาม [GAME-CONFIG-REFERENCE-TH.md](GAME-CONFIG-REFERENCE-TH.md) หากค่าบางชนิดไม่ตอบสนองต่อ `PalWorldSettings.ini`
+
+## Dashboard ไม่ถาม Login
+
+- เปิด Incognito/InPrivate เพื่อทดสอบ เพราะ Browser อาจจำ Basic Auth ไว้
+- ตรวจว่า `DASHBOARD_PASSWORD` ไม่ว่าง
+- Recreate Dashboard หลังแก้ `.env`/`.env.host`
+- ตรวจ Container log ต้องไม่ขึ้น `dashboard has no login protection`
+
+## ลบโฟลเดอร์ `runtime` ไม่ได้บน Windows
+
+เกิดจาก Process ยังจับไฟล์หรือ Current directory อยู่ในโฟลเดอร์ เช่น Host Agent, PowerShell, SteamCMD, Dashboard bind mount หรือหน้าต่าง Terminal
+
+ทำตามลำดับ:
+
+1. รัน `run\windows\04-Stop-All.bat`
+2. ปิด CMD/PowerShell/Notepad ที่เปิดไฟล์จากโฟลเดอร์โปรเจกต์
+3. ตรวจ Task Manager ว่าไม่มี `PalServer.exe`, `steamcmd.exe` และ PowerShell ที่รัน `PalworldHostAgent.ps1`
+4. รัน Compose down จากโฟลเดอร์อื่นหาก Dashboard ยัง mount `runtime/control`
+5. รอ 1–2 วินาทีแล้วลบอีกครั้ง
+
+โดยทั่วไป **ไม่ควรลบ `runtime` ทั้งหมด** เพราะมี Native SteamCMD และ Config backup ควรล้างเฉพาะ `runtime/control` หรือ `runtime/logs` เมื่อจำเป็น
+
+## SteamCMD ดูเหมือนค้างหลัง `Waiting for user info...OK`
+
+SteamCMD ครั้งแรกอาจอัปเดตตัวเองหลายรอบ ให้ดู Network/Disk activity ก่อน หากไม่มีการเปลี่ยนแปลงนานกว่า 5–10 นาที:
+
+1. ปิดหน้าต่าง Setup
+2. ปิด `steamcmd.exe` ที่ค้างใน Task Manager
+3. อย่าลบ `D:/PalServer` และ `runtime/steamcmd-windows`
+4. รัน `00-Setup.bat` ซ้ำเพื่อให้ Update/Validate ต่อ
+5. ตรวจ Antivirus/Firewall หากค้างซ้ำ
 
 รายละเอียดเพิ่มเติมดู [TROUBLESHOOTING-TH.md](TROUBLESHOOTING-TH.md)
 
@@ -899,6 +1069,7 @@ docker run --rm -v palworld-data:/data alpine:3.20 find /data/Pal/Saved -maxdept
 |---|---|
 | [FULL_GUIDE_TH.md](FULL_GUIDE_TH.md) | สถาปัตยกรรม, lifecycle, operation และ security |
 | [CONFIG-REFERENCE-TH.md](CONFIG-REFERENCE-TH.md) | ตัวแปร `.env`, `.env.host`, Compose และ Config precedence |
+| [GAME-CONFIG-REFERENCE-TH.md](GAME-CONFIG-REFERENCE-TH.md) | ค่า `PalWorldSettings.ini` ครบทุกค่า พร้อม Default ตัวอย่าง และผลเมื่อเพิ่ม/ลด |
 | [WINDOWS-HOST-MODE-TH.md](WINDOWS-HOST-MODE-TH.md) | Windows SteamCMD, Host Agent, Firewall, REST และ path |
 | [MIGRATE-TO-NAMED-VOLUME-TH.md](MIGRATE-TO-NAMED-VOLUME-TH.md) | Migration, verification, backup และ rollback |
 | [DASHBOARD-MAINTENANCE.md](DASHBOARD-MAINTENANCE.md) | Dashboard workflow, Job stages, archive format และ data files |
@@ -913,7 +1084,7 @@ docker run --rm -v palworld-data:/data alpine:3.20 find /data/Pal/Saved -maxdept
 
 ## Checklist ก่อนใช้งานจริง
 
-- [ ] เปลี่ยน Admin และ Dashboard password แล้ว
+- [ ] เปลี่ยน Admin และ Dashboard password แล้ว และทดสอบ Login ใน Incognito
 - [ ] Windows ใช้ `PALWORLD_HOST_DIR` แบบสั้น
 - [ ] REST/RCON ไม่เปิดออกอินเทอร์เน็ตโดยไม่จำเป็น
 - [ ] ทดสอบ Save World
@@ -921,7 +1092,21 @@ docker run --rm -v palworld-data:/data alpine:3.20 find /data/Pal/Saved -maxdept
 - [ ] ทดสอบ Import ด้วย World สำเนา
 - [ ] มี Backup นอกเครื่อง
 - [ ] ตรวจพื้นที่ Disk และ Docker logs
+- [ ] ทดสอบ Config flow: เก็บค่า → อัปเดตไฟล์ → Restart → ค่าใน GET /settings ตรง
 - [ ] ทดสอบ Shutdown/Restart ก่อนเปิดให้ผู้เล่นใช้งาน
+
+## พฤติกรรมที่ต้องได้ก่อน Release
+
+ทดสอบอย่างน้อยหนึ่งรอบบนระบบจริง:
+
+1. Login ใน Incognito ต้องถาม Username/Password
+2. แก้ Config → เก็บค่า → อัปเดตไฟล์ ต้องเหลือ `อัปเดตไฟล์ (0)`
+3. Restart แล้ว Job ต้องตรวจ `GET /settings`; ตารางรอ Restart ต้องหายเอง
+4. Export/Import `world_only` ต้องเปิด World ID ที่นำเข้าและพบ Player save
+5. `04-Stop-All.bat` ต้องหยุด PalServer, Host Agent และ Dashboard ครบ
+6. ปิดระบบแล้ว `01-Start-All.bat` ต้องเปิด Dashboard container ที่เคยถูก Stop กลับมาได้
+7. Setup/Update ต้องปิดระบบเดิมก่อน เรียก SteamCMD และพบ `PalServer.exe` หลังจบ
+8. Windows path ต้องสั้น เช่น `D:/PalServer` และ Save World ต้องผ่าน
 
 ## [TH] เครดิตและแหล่งอ้างอิง
 

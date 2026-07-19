@@ -71,9 +71,11 @@ Engine tuning ยังมาจาก environment ใน Compose และต�
 - Startup performance args
 - Dashboard credentials/resources
 
-`Configure-PalworldHost.ps1` Patch ค่า REST/RCON/Admin และข้อมูลหลักลง `PalWorldSettings.ini` ทุกครั้งที่ Setup/Start/Update/Restart/Doctor
+`Configure-PalworldHost.ps1` Patch ค่า REST/RCON/Admin และข้อมูลหลักลง `PalWorldSettings.ini` ทุกครั้งที่ Setup/Start/Restart
 
-Gameplay key อื่นยังแก้ผ่าน Dashboard ได้และจะไม่ถูก Patch เว้นแต่ชื่อ key ตรงกับรายการข้างต้น
+Gameplay key อื่นยังแก้ผ่าน Dashboard ได้และจะไม่ถูก Patch เว้นแต่ชื่อ key ตรงกับรายการข้างต้น รายละเอียดค่าเกมครบทุกตัวดู `GAME-CONFIG-REFERENCE-TH.md`
+
+Windows มีคำสั่งสำหรับผู้ใช้ 6 ไฟล์เท่านั้น: Setup/Update, Start All + System Check, Start Server, Start Dashboard, Stop All และ Move to Short Path รายละเอียดดู `WINDOWS-HOST-MODE-TH.md`
 
 ---
 
@@ -83,7 +85,9 @@ Gameplay key อื่นยังแก้ผ่าน Dashboard ได้แ�
 
 - Start: Docker API start หรือ `docker compose up`
 - Stop จาก Dashboard: REST Save/Shutdown แล้วรอ container หยุด
-- Restart job: announce → save → stop → start → wait REST
+- Restart job: Palworld native shutdown countdown → save/stop runtime → start → wait REST
+- กำหนดเวลาเริ่มงานและเวลารอแจ้งผู้เล่นแยกจากกันได้ ค่าเริ่มต้นเริ่มทันทีและแจ้งล่วงหน้า 60 วินาที
+- ระหว่าง Countdown หน้า Maintenance อัปเดตเวลาที่เหลือแบบสด และ Startup recovery จะเปิด Server กลับหาก Dashboard ถูกรีสตาร์ตกลางงาน
 - Compose stop/down: จัดการโดย Docker และ image stop handler
 
 ### Windows runtime
@@ -347,7 +351,7 @@ Windows modeใช้ Native NTFS โดยตรง แต่ต้องใช
 
 ### หลัง Config change
 
-- Gameplay setting บางค่า apply ตอน Restart
+- Gameplay setting บางค่า apply ตอน Restart: กดเก็บค่า → อัปเดตไฟล์ → Restart Server โดยปุ่ม Restart ไม่เขียนค่าร่าง
 - `.env`/Compose/Engine ต้อง Recreate container
 - `.env.host` startup args ต้อง Restart Windows server
 - Dashboard credential/resource ต้อง Recreate Dashboard
@@ -364,7 +368,7 @@ Windows modeใช้ Native NTFS โดยตรง แต่ต้องใช
 6. Copy env file และ dashboard data
 7. Windows ให้ชี้ `PALWORLD_HOST_DIR` ไป path เดิม
 8. Docker mode ให้ใช้ `PALWORLD_VOLUME_NAME` เดิม
-9. รัน Doctor/Compose config
+9. Windows รัน `01-Start-All.bat`; Docker mode รัน `docker compose config`
 10. Start และทดสอบ Export
 
 ห้าม copy Named Volume ด้วยการลากไฟล์จาก Docker Desktop UI ระหว่าง container ทำงาน
@@ -403,6 +407,7 @@ run\windows\02-Start-Server.bat
 ## 14. เอกสารต่อเนื่อง
 
 - `CONFIG-REFERENCE-TH.md` — ตัวแปรและ precedence
+- `GAME-CONFIG-REFERENCE-TH.md` — ค่าเกมครบทุกตัว พร้อม Default และตัวอย่าง
 - `ARCHITECTURE-TH.md` — control/data flow
 - `DASHBOARD-MAINTENANCE.md` — job stages และ API behavior
 - `TROUBLESHOOTING-TH.md` — diagnosis ตามอาการ
@@ -415,3 +420,18 @@ run\windows\02-Start-Server.bat
 - แสดง World ID และจำนวน Player save ในหน้า Import/Job
 - ตรวจ World ID และ `Level.sav` หลัง Start ก่อนประกาศสำเร็จ
 - Rollback ค่า `DedicatedServerName` พร้อม SaveGames เมื่อ Import ล้มเหลว
+
+
+### สถานะค่าร่าง ค่าในไฟล์ และค่าที่ Server ใช้อยู่
+
+หน้า Config แยกสถานะเป็น 3 ชั้นเพื่อป้องกันความสับสน:
+
+- **Server ใช้อยู่**: ค่าจาก REST `GET /settings` ของ Process ที่กำลังรัน
+- **ในไฟล์**: ค่าที่อ่านจาก `PalWorldSettings.ini` และจะถูกโหลดเมื่อ Restart
+- **ค่าร่าง**: ค่าที่แก้ในหน้าเว็บแต่ยังไม่ได้กด **อัปเดตไฟล์**
+
+หลังอัปเดตไฟล์สำเร็จ ค่าจะถูกย้ายออกจากรายการร่างและแสดงในคอลัมน์ **ในไฟล์ — รอ Restart** ปุ่ม Restart จะเตือนเฉพาะค่าร่างที่ยังไม่ได้เขียน ไม่เตือนค่าที่บันทึกลงไฟล์แล้ว
+
+เมื่อเริ่ม Restart ระบบจะล็อกสำเนา `PalWorldSettings.ini` ล่าสุดไว้ก่อน จากนั้นแจ้งผู้เล่นและหยุด Server ให้สนิท แล้วเขียนสำเนาที่ล็อกไว้กลับลงไฟล์อีกครั้งก่อนเปิด Server วิธีนี้ป้องกันกรณี Process เดิมเขียนค่า Runtime เก่าทับไฟล์ระหว่าง Shutdown หลัง REST API พร้อม ระบบจะอ่าน `GET /settings` และตรวจเฉพาะค่าที่รอ Restart หากค่าไม่ตรง Job จะเป็น `failed` พร้อมระบุค่าที่ไม่ตรง แทนการขึ้น `completed` ผิด ๆ
+
+เมื่อการตรวจผ่าน หน้า Config จะโหลดทั้ง `GET /settings` และไฟล์ใหม่อัตโนมัติ สถานะ **อัปเดตไฟล์แล้ว — รอ Restart** และตารางค่าที่รอใช้จะหายทันทีโดยไม่ต้อง Refresh หน้า นอกจากนี้ `DenyTechnologyList=` และ `DenyTechnologyList=()` จะถูกตีความเป็นรายการว่าง `[]` เหมือนกับ REST API จึงไม่แสดงเป็นความต่างปลอม

@@ -10,7 +10,7 @@
 |---|---|
 | Dashboard credential/resource | Recreate Dashboard |
 | Docker Compose environment ของ Palworld | Recreate `palworld` |
-| Gameplay Config ผ่าน Dashboard | Restart Server สำหรับค่าที่อ่านตอน boot |
+| Gameplay Config ผ่าน Dashboard | กดอัปเดตไฟล์ก่อน แล้ว Restart Server แยกต่างหากสำหรับค่าที่อ่านตอน boot |
 | Windows `.env.host` startup args | Restart Windows Server |
 | Windows Admin/REST/RCON/Port | Start/Restart ซึ่งจะ Patch Config |
 | Volume name/path | Stop stack และตรวจ data ก่อน Start |
@@ -208,7 +208,7 @@ Dashboard PALWORLD_ADMIN_PASSWORD environment
 
 ### Windows
 
-`.env.host` เป็น source of truth และ patcher เขียน `AdminPassword` ทุก Start/Update/Doctor
+`.env.host` เป็น source of truth และ patcher เขียน `AdminPassword` ทุก Setup/Start/Restart
 
 ---
 
@@ -237,3 +237,18 @@ PALWORLD_HOST_WORKER_THREADS=
 PALWORLD_HOST_EXTRA_ARGS=
 PALWORLD_STEAMCMD_VALIDATE=true
 ```
+
+
+### สถานะค่าร่าง ค่าในไฟล์ และค่าที่ Server ใช้อยู่
+
+หน้า Config แยกสถานะเป็น 3 ชั้นเพื่อป้องกันความสับสน:
+
+- **Server ใช้อยู่**: ค่าจาก REST `GET /settings` ของ Process ที่กำลังรัน
+- **ในไฟล์**: ค่าที่อ่านจาก `PalWorldSettings.ini` และจะถูกโหลดเมื่อ Restart
+- **ค่าร่าง**: ค่าที่แก้ในหน้าเว็บแต่ยังไม่ได้กด **อัปเดตไฟล์**
+
+หลังอัปเดตไฟล์สำเร็จ ค่าจะถูกย้ายออกจากรายการร่างและแสดงในคอลัมน์ **ในไฟล์ — รอ Restart** ปุ่ม Restart จะเตือนเฉพาะค่าร่างที่ยังไม่ได้เขียน ไม่เตือนค่าที่บันทึกลงไฟล์แล้ว
+
+เมื่อเริ่ม Restart ระบบจะล็อกสำเนา `PalWorldSettings.ini` ล่าสุดไว้ก่อน จากนั้นแจ้งผู้เล่นและหยุด Server ให้สนิท แล้วเขียนสำเนาที่ล็อกไว้กลับลงไฟล์อีกครั้งก่อนเปิด Server วิธีนี้ป้องกันกรณี Process เดิมเขียนค่า Runtime เก่าทับไฟล์ระหว่าง Shutdown หลัง REST API พร้อม ระบบจะอ่าน `GET /settings` และตรวจเฉพาะค่าที่รอ Restart หากค่าไม่ตรง Job จะเป็น `failed` พร้อมระบุค่าที่ไม่ตรง แทนการขึ้น `completed` ผิด ๆ
+
+เมื่อการตรวจผ่าน หน้า Config จะโหลดทั้ง `GET /settings` และไฟล์ใหม่อัตโนมัติ สถานะ **อัปเดตไฟล์แล้ว — รอ Restart** และตารางค่าที่รอใช้จะหายทันทีโดยไม่ต้อง Refresh หน้า นอกจากนี้ `DenyTechnologyList=` และ `DenyTechnologyList=()` จะถูกตีความเป็นรายการว่าง `[]` เหมือนกับ REST API จึงไม่แสดงเป็นความต่างปลอม

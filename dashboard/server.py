@@ -48,7 +48,11 @@ JOB_STAGE_INFO = {
     "scheduled": ("รอถึงเวลาที่กำหนด", "งานอยู่ในคิวและยังไม่เริ่ม", 0),
     "starting": ("กำลังเริ่มงาน", "Dashboard กำลังเตรียม Workflow", 2),
     "announcing": ("กำลังประกาศ Maintenance", "ส่งข้อความแจ้งผู้เล่นและรอตามเวลาเตือน", 8),
+    "restart_shutdown_countdown": ("กำลังแจ้งเตือนก่อน Restart", "Palworld กำลังนับถอยหลังแบบเดียวกับ Shutdown Server", 8),
     "stopping_server": ("กำลังหยุดเซิร์ฟเวอร์", "บันทึก World และหยุด Palworld runtime ก่อนจัดการไฟล์", 18),
+    "preserving_config": ("กำลังล็อก Config สำหรับ Restart", "เก็บสำเนา PalWorldSettings.ini ที่ผู้ใช้ยืนยันไว้ก่อนหยุด Server", 5),
+    "applying_config": ("กำลังใช้ Config หลัง Server หยุด", "เขียน Config ที่ยืนยันไว้กลับหลัง Runtime หยุดสนิท เพื่อกันค่าถูกเขียนทับตอน Shutdown", 45),
+    "verifying_config": ("กำลังตรวจ Config ที่ Server โหลด", "อ่าน GET /settings หลัง Restart และเทียบกับค่าที่อยู่ในไฟล์", 98),
     "safety_backup": ("กำลังสร้าง Safety Backup", "สำรอง Pal/Saved ปัจจุบันก่อน Import", 30),
     "creating_archive": ("กำลังสร้างไฟล์ Export", "กำลังบีบอัด Pal/Saved เป็น ZIP", 52),
     "validating_archive": ("กำลังตรวจไฟล์ Import", "ตรวจโครงสร้าง ZIP และความเข้ากันได้กับระบบปลายทาง", 4),
@@ -82,6 +86,7 @@ BAN_FILE = DATA_DIR / "bans.json"
 MAINTENANCE_FILE = DATA_DIR / "maintenance.json"
 CONFIG_FILE = Path(os.getenv("PALWORLD_CONFIG_FILE", str(SAVED_DIR / "Config" / "LinuxServer" / "PalWorldSettings.ini"))).resolve()
 CONFIG_BACKUP_DIR = DATA_DIR / "config-backups"
+RESTART_CONFIG_DIR = DATA_DIR / "restart-configs"
 MAX_CONFIG_BYTES = max(16 * 1024, int(os.getenv("DASHBOARD_MAX_CONFIG_KB", "1024")) * 1024)
 MAX_CONFIG_BACKUPS = max(1, int(os.getenv("DASHBOARD_MAX_CONFIG_BACKUPS", "100")))
 DISCORD_WEBHOOK_URL = os.getenv("DASHBOARD_DISCORD_WEBHOOK_URL", "").strip()
@@ -110,7 +115,7 @@ def iso_now():
 
 
 def ensure_directories():
-    paths = [DATA_DIR, EXPORT_DIR, IMPORT_DIR, STAGING_DIR, CONFIG_BACKUP_DIR]
+    paths = [DATA_DIR, EXPORT_DIR, IMPORT_DIR, STAGING_DIR, CONFIG_BACKUP_DIR, RESTART_CONFIG_DIR]
     if RUNTIME_MODE == "external":
         paths.append(EXTERNAL_CONTROL_DIR)
     for path in paths:
@@ -317,12 +322,24 @@ def container_status():
         return {"available": False, "running": False, "status": "unknown", "health": "unknown", "runtime_mode": RUNTIME_MODE, "runtime_label": RUNTIME_LABEL, "error": str(exc)}
 
 
-def stop_container():
+def stop_container(skip_rest_shutdown=False):
     if RUNTIME_MODE == "external":
-        try:
-            api_request("shutdown", "POST", {"waittime": 0, "message": "Dashboard maintenance shutdown"}, timeout=15)
-        except Exception as exc:
-            print(f"REST shutdown before Host Agent stop failed: {exc}")
+        if not skip_rest_shutdown:
+            rest_stop_requested = False
+            try:
+                # Palworld 1.0 may reject waittime=0 with HTTP 400. One second is
+                # effectively immediate and follows the official shutdown payload.
+                api_request("shutdown", "POST", {"waittime": 1, "message": "Dashboard maintenance shutdown"}, timeout=15)
+                rest_stop_requested = True
+            except Exception as exc:
+                print(f"REST shutdown before Host Agent stop failed: {exc}")
+            if not rest_stop_requested:
+                try:
+                    api_request("stop", "POST", timeout=15)
+                    rest_stop_requested = True
+                    print("REST force-stop requested after graceful shutdown failed")
+                except Exception as exc:
+                    print(f"REST force-stop before Host Agent fallback failed: {exc}")
         external_control_request("stop")
     else:
         quoted = urllib.parse.quote(PALWORLD_CONTAINER_NAME, safe="")
@@ -535,6 +552,14 @@ def config_snapshot():
             size = stat_info.st_size
             modified_at = datetime.fromtimestamp(stat_info.st_mtime, LOCAL_TZ).isoformat(timespec="seconds")
             sha256 = hashlib.sha256(raw).hexdigest()
+        file_settings = {}
+        config_parse_error = None
+        if exists and content:
+            try:
+                _, _, ordered_keys, raw_values = parse_option_settings(content)
+                file_settings = {key: decode_setting_value_for_key(key, raw_values[key]) for key in ordered_keys}
+            except ValueError as exc:
+                config_parse_error = str(exc)
         return {
             "path": str(CONFIG_FILE),
             "exists": exists,
@@ -543,6 +568,8 @@ def config_snapshot():
             "modified_at": modified_at,
             "sha256": sha256,
             "max_bytes": MAX_CONFIG_BYTES,
+            "file_settings": file_settings,
+            "config_parse_error": config_parse_error,
         }
 
 
@@ -598,6 +625,7 @@ def save_config_content(content):
 SETTING_KEY_PATTERN = re.compile(r"^[A-Za-z][A-Za-z0-9_]*$")
 BARE_VALUE_PATTERN = re.compile(r"^[A-Za-z0-9_.:/+\-]+$")
 UNQUOTED_STRING_KEYS = {"Difficulty", "RandomizerType", "DeathPenalty", "LogFormatType", "AdditionalDropItemWhenPlayerKillingInPvPMode"}
+EMPTY_LIST_SETTING_KEYS = {"DenyTechnologyList"}
 
 
 def find_option_settings_bounds(content):
@@ -680,6 +708,55 @@ def parse_option_settings(content):
     return body_start, body_end, ordered, values
 
 
+def decode_setting_value(raw_value):
+    raw = str(raw_value).strip()
+    if raw == "True":
+        return True
+    if raw == "False":
+        return False
+    if len(raw) >= 2 and raw[0] == raw[-1] and raw[0] in ('"', "'"):
+        if raw[0] == '"':
+            try:
+                return json.loads(raw)
+            except json.JSONDecodeError:
+                return raw[1:-1]
+        return raw[1:-1]
+    if raw.startswith("(") and raw.endswith(")"):
+        inner = raw[1:-1].strip()
+        if not inner:
+            return []
+        return [decode_setting_value(item) for item in split_top_level(inner)]
+    if re.fullmatch(r"[+-]?\d+", raw):
+        try:
+            return int(raw)
+        except ValueError:
+            pass
+    if re.fullmatch(r"[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?", raw):
+        try:
+            value = float(raw)
+            if math.isfinite(value):
+                return value
+        except ValueError:
+            pass
+    return raw
+
+
+def decode_setting_value_for_key(key, raw_value):
+    raw = str(raw_value).strip()
+    if key in EMPTY_LIST_SETTING_KEYS and raw in ("", "()"):
+        return []
+    return decode_setting_value(raw_value)
+
+
+def setting_values_equal(key, left, right):
+    if key in EMPTY_LIST_SETTING_KEYS:
+        left = [] if left in (None, "", ()) else left
+        right = [] if right in (None, "", ()) else right
+    if isinstance(left, (int, float)) and not isinstance(left, bool) and isinstance(right, (int, float)) and not isinstance(right, bool):
+        return math.isclose(float(left), float(right), rel_tol=1e-9, abs_tol=1e-9)
+    return left == right
+
+
 def quote_setting_string(value):
     return json.dumps(value, ensure_ascii=False)
 
@@ -757,6 +834,185 @@ def patch_config_settings(changes, expected_sha256=None):
         updated_content = content[:body_start] + new_body + content[body_end:]
         saved = save_config_content(updated_content)
     return {"changed": changed, "changed_count": len(changed), **saved}
+
+
+def restart_config_path(job_id):
+    return RESTART_CONFIG_DIR / f"restart-{job_id}.ini"
+
+
+def stage_restart_config(job):
+    mark_job_stage(job, "preserving_config")
+    with CONFIG_LOCK:
+        snapshot = config_snapshot()
+        if not snapshot.get("exists"):
+            raise RuntimeError("ยังไม่พบ PalWorldSettings.ini สำหรับ Restart")
+        raw = CONFIG_FILE.read_bytes()
+        validate_config_content(raw.decode("utf-8-sig"))
+        staged = restart_config_path(job["id"])
+        temp = staged.with_suffix(staged.suffix + ".tmp")
+        with temp.open("wb") as fh:
+            fh.write(raw)
+            fh.flush()
+            os.fsync(fh.fileno())
+        os.replace(temp, staged)
+
+    runtime_settings = {}
+    try:
+        payload = api_request("settings", timeout=10)
+        if isinstance(payload, dict):
+            runtime_settings = payload
+    except Exception as exc:
+        update_job(job["id"], config_runtime_snapshot_error=str(exc))
+
+    verify_targets = {
+        key: value
+        for key, value in snapshot.get("file_settings", {}).items()
+        if key in runtime_settings and not setting_values_equal(key, runtime_settings.get(key), value)
+    }
+    staged_sha = hashlib.sha256(raw).hexdigest()
+    update_job(
+        job["id"],
+        restart_config_file=staged.name,
+        restart_config_sha256=staged_sha,
+        config_verify_targets=verify_targets,
+        config_verify_count=len(verify_targets),
+        stage_detail=(
+            f"เก็บ Config SHA-256 {staged_sha[:12]}… แล้ว"
+            + (f" | มี {len(verify_targets)} ค่ารอโหลดหลัง Restart" if verify_targets else " | ไม่มีค่าที่ต้องตรวจเปรียบเทียบ")
+        ),
+    )
+    return get_job(job["id"])
+
+
+def apply_staged_restart_config(job, update_stage=True):
+    staged_name = job.get("restart_config_file")
+    if not staged_name:
+        raise RuntimeError("ไม่พบข้อมูล Config ที่ล็อกไว้สำหรับ Restart")
+    staged = RESTART_CONFIG_DIR / Path(staged_name).name
+    if not staged.is_file():
+        raise RuntimeError(f"ไม่พบไฟล์ Config ที่ล็อกไว้: {staged.name}")
+    raw = staged.read_bytes()
+    content = raw.decode("utf-8-sig")
+    validate_config_content(content)
+    expected_sha = job.get("restart_config_sha256") or hashlib.sha256(raw).hexdigest()
+    actual_staged_sha = hashlib.sha256(raw).hexdigest()
+    if actual_staged_sha != expected_sha:
+        raise RuntimeError("Config ที่ล็อกไว้สำหรับ Restart มี SHA-256 ไม่ตรง")
+    if update_stage:
+        mark_job_stage(job, "applying_config")
+    with CONFIG_LOCK:
+        CONFIG_FILE.parent.mkdir(parents=True, exist_ok=True)
+        before_sha = hashlib.sha256(CONFIG_FILE.read_bytes()).hexdigest() if CONFIG_FILE.is_file() else None
+        temp = CONFIG_FILE.with_suffix(CONFIG_FILE.suffix + ".restart.tmp")
+        with temp.open("wb") as fh:
+            fh.write(raw)
+            fh.flush()
+            os.fsync(fh.fileno())
+        os.replace(temp, CONFIG_FILE)
+        try:
+            os.chown(CONFIG_FILE, PALWORLD_PUID, PALWORLD_PGID)
+        except OSError:
+            pass
+        after_sha = hashlib.sha256(CONFIG_FILE.read_bytes()).hexdigest()
+    if after_sha != expected_sha:
+        raise RuntimeError("เขียน Config หลังหยุด Server แล้ว แต่ SHA-256 ไม่ตรงกับค่าที่ล็อกไว้")
+    update_job(
+        job["id"],
+        config_reapplied_after_stop=True,
+        config_file_sha_before_reapply=before_sha,
+        config_file_sha_after_reapply=after_sha,
+        stage_detail=(
+            "เขียน PalWorldSettings.ini ที่ยืนยันไว้กลับหลัง Server หยุดแล้ว"
+            + (" | ตรวจพบว่าไฟล์ถูกเปลี่ยนระหว่าง Shutdown และกู้ค่ากลับให้แล้ว" if before_sha and before_sha != expected_sha else " | ไฟล์ไม่ถูกเปลี่ยนระหว่าง Shutdown")
+        ),
+    )
+    return get_job(job["id"])
+
+
+def active_world_option_files():
+    root = SAVED_DIR / "SaveGames" / "0"
+    if not root.is_dir():
+        return []
+    return [str(path) for path in root.glob("*/WorldOption.sav") if path.is_file()]
+
+
+def verify_restarted_config(job, timeout_seconds=60):
+    targets = job.get("config_verify_targets") or {}
+    mark_job_stage(
+        job,
+        "verifying_config",
+        detail=(f"กำลังตรวจ {len(targets)} ค่าจาก GET /settings" if targets else "กำลังโหลด GET /settings ใหม่หลัง Restart"),
+    )
+    started = time.time()
+    deadline = started + max(10, timeout_seconds)
+    last_mismatches = []
+    while time.time() < deadline:
+        runtime = api_request("settings", timeout=10)
+        if not isinstance(runtime, dict):
+            runtime = {}
+        last_mismatches = []
+        for key, expected in targets.items():
+            if key not in runtime:
+                last_mismatches.append({"key": key, "expected": expected, "actual": "<missing>"})
+            elif not setting_values_equal(key, runtime.get(key), expected):
+                last_mismatches.append({"key": key, "expected": expected, "actual": runtime.get(key)})
+        if not last_mismatches:
+            current = config_snapshot()
+            current_sha = current.get("sha256")
+            expected_sha = job.get("restart_config_sha256")
+            if expected_sha and current_sha != expected_sha:
+                raise RuntimeError(
+                    "Server เปิดแล้วแต่ PalWorldSettings.ini ถูกเขียนทับอีกครั้งหลัง Start "
+                    f"(ต้องเป็น {expected_sha[:12]}… แต่เป็น {(current_sha or 'ไม่มี')[:12]}…)"
+                )
+            update_job(
+                job["id"],
+                config_verified=True,
+                config_verified_count=len(targets),
+                config_mismatches=[],
+                completion_detail=(
+                    f"Restart สำเร็จและ GET /settings ตรงกับ Config {len(targets)} ค่าที่รอใช้"
+                    if targets else "Restart สำเร็จและโหลดสถานะ Config ใหม่แล้ว"
+                ),
+                stage_detail=(
+                    f"GET /settings ตรงกับค่าในไฟล์ครบ {len(targets)} ค่า"
+                    if targets else "GET /settings พร้อมใช้งานหลัง Restart"
+                ),
+            )
+            return
+        elapsed = int(time.time() - started)
+        preview = ", ".join(
+            f"{item['key']}: ต้องเป็น {item['expected']} แต่ได้ {item['actual']}"
+            for item in last_mismatches[:5]
+        )
+        update_job(
+            job["id"],
+            config_mismatches=last_mismatches,
+            stage_detail=f"รอ GET /settings โหลดค่าใหม่ {elapsed} วินาที | {preview}",
+            progress_percent=98,
+        )
+        time.sleep(3)
+
+    hints = []
+    world_options = active_world_option_files()
+    if world_options:
+        hints.append("พบ WorldOption.sav ซึ่งอาจ override ค่า Gameplay จาก PalWorldSettings.ini")
+    preview = "; ".join(
+        f"{item['key']}: ในไฟล์={item['expected']} แต่ Server={item['actual']}"
+        for item in last_mismatches[:10]
+    )
+    hint_text = (" | " + "; ".join(hints)) if hints else ""
+    raise RuntimeError(f"Restart เสร็จแต่ Server ไม่ได้โหลด Config ตามไฟล์: {preview}{hint_text}")
+
+
+def cleanup_restart_config(job):
+    staged_name = job.get("restart_config_file")
+    if not staged_name:
+        return
+    try:
+        (RESTART_CONFIG_DIR / Path(staged_name).name).unlink()
+    except FileNotFoundError:
+        pass
 
 
 def parse_schedule(value):
@@ -1308,6 +1564,116 @@ def announce_and_wait(job):
         print(f"Save before maintenance failed; graceful runtime stop will still be attempted: {exc}")
 
 
+def format_countdown_th(seconds):
+    seconds = max(0, int(seconds or 0))
+    minutes, secs = divmod(seconds, 60)
+    hours, minutes = divmod(minutes, 60)
+    parts = []
+    if hours:
+        parts.append(f"{hours} ชม.")
+    if minutes:
+        parts.append(f"{minutes} นาที")
+    if secs or not parts:
+        parts.append(f"{secs} วินาที")
+    return " ".join(parts)
+
+
+def restart_shutdown_countdown(job):
+    """Notify players through Palworld's native shutdown countdown, then stop the runtime."""
+    warning = int(job.get("warning_seconds", 0))
+    message = job.get("message") or "Server maintenance: restarting to apply configuration."
+    shutdown_request_sent = False
+    shutdown_error = None
+
+    try:
+        # Palworld 1.0 may return HTTP 400 for waittime=0. Use one second for
+        # immediate Restart while keeping the visible Dashboard countdown at zero.
+        native_waittime = max(1, warning)
+        api_request(
+            "shutdown",
+            "POST",
+            {"waittime": native_waittime, "message": message},
+            timeout=15,
+        )
+        shutdown_request_sent = True
+    except Exception as exc:
+        shutdown_error = str(exc)
+        print(f"Native shutdown countdown failed; falling back to announce/countdown: {exc}")
+        try:
+            api_request("announce", "POST", {"message": message}, timeout=15)
+        except Exception as announce_exc:
+            print(f"Fallback restart announcement failed: {announce_exc}")
+
+    shutdown_requested_at = now_local()
+    shutdown_due_at = shutdown_requested_at + timedelta(seconds=warning)
+    update_job(
+        job["id"],
+        shutdown_request_sent=shutdown_request_sent,
+        shutdown_request_error=shutdown_error,
+        shutdown_requested_at=shutdown_requested_at.isoformat(timespec="seconds"),
+        shutdown_due_at=shutdown_due_at.isoformat(timespec="seconds"),
+        countdown_total_seconds=warning,
+        countdown_remaining_seconds=warning,
+        notification_mode="palworld_shutdown" if shutdown_request_sent else "dashboard_fallback",
+    )
+    discord_notify(
+        "เริ่มนับถอยหลังก่อน Restart",
+        f"งาน `{job['id']}`\nข้อความ: {message}\nRestart ใน {warning} วินาที\n"
+        + ("ใช้ระบบแจ้งเตือน Shutdown ของ Palworld" if shutdown_request_sent else "ใช้การนับถอยหลังสำรองจาก Dashboard"),
+        "warning",
+    )
+
+    started = time.monotonic()
+    while True:
+        elapsed = int(time.monotonic() - started)
+        remaining = max(0, warning - elapsed)
+        status = container_status()
+        completed = warning - remaining
+        progress = 17 if warning == 0 else min(17, 8 + int((completed / max(1, warning)) * 9))
+        mode_text = (
+            "Palworld ส่งข้อความและนับถอยหลังแบบ Shutdown Server แล้ว"
+            if shutdown_request_sent
+            else "ส่งข้อความสำรองแล้ว เนื่องจากเรียก Shutdown API ไม่สำเร็จ"
+        )
+        detail = (
+            f"{mode_text} | เหลือ {format_countdown_th(remaining)} "
+            f"จาก {format_countdown_th(warning)}"
+        )
+        if shutdown_error:
+            detail += f" | Shutdown API: {shutdown_error}"
+        update_job(
+            job["id"],
+            stage_detail=detail,
+            progress_percent=progress,
+            countdown_remaining_seconds=remaining,
+            runtime_status=status,
+        )
+        if remaining <= 0:
+            break
+        time.sleep(min(1, remaining))
+
+    mark_job_stage(
+        job,
+        "stopping_server",
+        detail="ครบเวลาเตือนแล้ว กำลังบันทึก World และหยุด Palworld runtime ก่อนเปิดใหม่",
+    )
+
+    # Native /shutdown normally saves the world. This extra save is best-effort for
+    # fallback cases and harmless if the REST API has already gone offline.
+    try:
+        api_request("save", "POST", timeout=15)
+        update_job(job["id"], save_before_restart=True)
+    except Exception as exc:
+        update_job(job["id"], save_before_restart=False, save_before_restart_error=str(exc))
+        print(f"Save before restart stop failed; continuing graceful runtime stop: {exc}")
+
+    # Always stop through the runtime controller as well. This prevents Docker
+    # supervisors/restart policies from bringing the old process back before the
+    # Dashboard explicitly starts it with the new configuration.
+    stop_container(skip_rest_shutdown=shutdown_request_sent)
+    update_job(job["id"], countdown_remaining_seconds=0, runtime_status=container_status())
+
+
 def run_export_job(job):
     mark_job_stage(job, "announcing")
     announce_and_wait(job)
@@ -1537,21 +1903,25 @@ def run_import_job(job):
 
 
 def run_restart_job(job):
-    mark_job_stage(job, "announcing")
-    announce_and_wait(job)
-    mark_job_stage(job, "stopping_server")
-    stop_container()
+    current = stage_restart_config(job)
+    mark_job_stage(current, "restart_shutdown_countdown")
+    restart_shutdown_countdown(current)
+    current = get_job(job["id"]) or current
     discord_notify("เซิร์ฟเวอร์ปิดชั่วคราว", f"งาน `{job['id']}` กำลัง Restart หลังแก้ Config", "warning")
-    mark_job_stage(job, "starting_server")
+    current = apply_staged_restart_config(current)
+    mark_job_stage(current, "starting_server")
     start_container()
     wait_for_server_ready(
         job_id=job["id"],
         stage="waiting_rest_api",
         context="Restart แล้ว กำลังรอ REST API",
     )
+    current = get_job(job["id"]) or current
+    verify_restarted_config(current)
+    cleanup_restart_config(current)
     discord_notify(
         "Restart เสร็จและเปิดเซิร์ฟเวอร์แล้ว",
-        f"งาน `{job['id']}`\nConfig: `{CONFIG_FILE.name}`",
+        f"งาน `{job['id']}`\nConfig: `{CONFIG_FILE.name}`\nตรวจ GET /settings แล้ว",
         "success",
     )
 
@@ -1622,6 +1992,47 @@ def run_job(job):
 
 def recover_interrupted_job(job):
     messages = ["Dashboard ถูกรีสตาร์ตระหว่างทำงาน"]
+
+    if job.get("type") == "restart":
+        stage = job.get("stage")
+        shutdown_sent = bool(job.get("shutdown_request_sent"))
+        if shutdown_sent and stage in ("restart_shutdown_countdown", "stopping_server"):
+            due_text = job.get("shutdown_due_at")
+            due_at = None
+            try:
+                due_at = datetime.fromisoformat(due_text) if due_text else None
+                if due_at and due_at.tzinfo is None:
+                    due_at = due_at.replace(tzinfo=LOCAL_TZ)
+            except Exception:
+                due_at = None
+            while due_at and now_local() < due_at:
+                remaining = max(0, int((due_at - now_local()).total_seconds()))
+                update_job(
+                    job["id"],
+                    stage_detail=(
+                        "Dashboard เริ่มใหม่ระหว่าง Countdown แต่ Palworld ยังมีคำสั่ง Shutdown เดิมอยู่ "
+                        f"| รออีก {format_countdown_th(remaining)} แล้วจะเปิด Server กลับอัตโนมัติ"
+                    ),
+                    countdown_remaining_seconds=remaining,
+                )
+                time.sleep(min(1, max(1, remaining)))
+            try:
+                stop_container(skip_rest_shutdown=True)
+                messages.append("ครบเวลา Shutdown เดิมและหยุด Runtime เรียบร้อย")
+            except Exception as exc:
+                messages.append(f"หยุด Runtime หลัง Countdown เดิมไม่สำเร็จ: {exc}")
+
+    if job.get("type") == "restart" and job.get("restart_config_file"):
+        try:
+            status = container_status()
+            if status.get("running"):
+                stop_container(skip_rest_shutdown=bool(job.get("shutdown_request_sent")))
+                messages.append("หยุด Runtime ก่อนกู้ Config ที่ล็อกไว้")
+            apply_staged_restart_config(job, update_stage=False)
+            messages.append("เขียน Config ที่ล็อกไว้กลับก่อนเปิด Server")
+        except Exception as exc:
+            messages.append(f"กู้ Config สำหรับ Restart ไม่สำเร็จ: {exc}")
+
     if job.get("type") == "import":
         import_mode = normalize_import_mode(job.get("import_mode"))
         if import_mode == "world_only":
