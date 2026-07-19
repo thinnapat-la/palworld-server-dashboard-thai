@@ -1,583 +1,864 @@
-# Palworld Server Dashboard Thai 1.1.0
+# 🚀 Palworld Server & Dashboard Thai Edition — 1.1.0 (Official Release)
 
-> Release notes สำหรับ Tag `v1.1.0`  
-> เปรียบเทียบจากเวอร์ชัน `1.0.0`  
-> วันที่เผยแพร่: 18 กรกฎาคม 2026
+เวอร์ชัน **1.1.0** เป็นการปรับปรุงครั้งใหญ่จากเวอร์ชัน 1.0.0 โดยขยายจากระบบ Palworld Server บน Docker เพียงรูปแบบเดียว ไปเป็นระบบบริหารเซิร์ฟเวอร์แบบหลาย Runtime ที่รองรับทั้ง **Linux Docker**, **Windows Host-native** และ **macOS Docker**
 
-## สรุป
+ในรุ่นนี้มีการปรับปรุงด้านประสิทธิภาพ การจัดเก็บ Save การ Export/Import ผ่าน Dashboard การติดตั้งบน Windows การตรวจสอบปัญหา และเอกสารประกอบทั้งหมด
 
-เวอร์ชัน `1.1.0` ปรับโปรเจกต์จากชุด Docker สำหรับ Linux เป็นแพ็กเกจดูแล Palworld Dedicated Server แบบหลาย Runtime ในชุดเดียว:
-
-- **Linux:** เกมและ Dashboard รันใน Docker โดยใช้ Named Volume
-- **Windows:** เกมรันเป็น `PalServer.exe` บน Windows โดยตรง ส่วน Dashboard รันใน Docker Desktop
-- **macOS:** เกมและ Dashboard รันเป็น Linux containers ผ่าน Docker Desktop
-
-รุ่นนี้เน้นความเสถียรของข้อมูล, ลดงานเบื้องหลังที่ไม่จำเป็น, เพิ่มการควบคุม Runtime จาก Dashboard, เพิ่มเครื่องมือ Setup/Update/Doctor และเขียนเอกสารใหม่ให้ใช้งานได้ครบจาก `README.md`
+Version **1.1.0** is a major operational update over 1.0.0. The project now supports multiple server runtime modes, improved save management, safer import/export workflows, native Windows server execution, resource optimization, and expanded documentation.
 
 ---
 
-## จุดเด่นของรุ่นนี้
+## ✨ Highlights / จุดเด่นของเวอร์ชัน 1.1.0
 
-### รองรับ 3 รูปแบบการใช้งาน
+* รองรับการใช้งาน 3 รูปแบบ
 
-| ระบบ | Palworld Runtime | Dashboard | Storage หลัก |
-|---|---|---|---|
-| Linux | Docker container | Docker container | Named Volume `palworld-data` |
-| Windows | Native `PalServer.exe` | Docker Desktop | โฟลเดอร์ Windows เช่น `D:/PalServer` |
-| macOS | Linux container ผ่าน Docker Desktop | Docker container | Named Volume `palworld-data` |
-
-### Windows Host-native mode
-
-เพิ่มโหมด Windows ที่ไม่รันตัวเกมภายใน WSL2/Docker Desktop:
-
-- ดาวน์โหลดและอัปเดตเกมด้วย Native Windows `steamcmd.exe`
-- รัน `PalServer.exe` บน Windows โดยตรง
-- ใช้ PowerShell Host Agent รับคำสั่ง Start/Stop/Restart จาก Dashboard
-- สร้างและปรับ `PalWorldSettings.ini` อัตโนมัติ
-- เปิด REST API และ RCON จากค่าใน `.env.host`
-- รองรับ `PALWORLD_HOST_DIR` ทั้ง Relative path และ Absolute path
-- เพิ่มการตรวจ Path length และ Write permission
-- เพิ่มเครื่องมือย้าย Server ไปยัง Path สั้นเพื่อป้องกัน Save failure
-- เก็บ Host Agent heartbeat และ Log สำหรับตรวจปัญหา
-
-### Linux/macOS ใช้ Docker Named Volume
-
-เปลี่ยนข้อมูลเกมจาก Bind mount:
-
-```yaml
-- ./palworld:/palworld
-```
-
-เป็น Named Volume:
-
-```yaml
-- palworld-data:/palworld
-```
-
-เพื่อแยกข้อมูลเกมออกจากอายุของ Container และลดปัญหา I/O ผ่าน Shared folder โดยเฉพาะเมื่อใช้ Docker Desktop
-
-### Dashboard รองรับหลาย Runtime
-
-Dashboard สามารถควบคุมได้ทั้ง:
-
-- Docker runtime
-- External Windows runtime ผ่าน Host Agent
-
-ฟังก์ชันหลักประกอบด้วย:
-
-- Start, Stop และ Restart Runtime
-- ตรวจ REST API, Metrics, Players และ Settings
-- Save World ก่อนหยุด Server
-- Config form editor และ Raw editor
-- สำรอง Config ก่อนบันทึก
-- Export World
-- Import World พร้อม Validation, Staging, Safety backup และ Rollback
-- Kick, Ban และ Unban พร้อมประวัติ
-- Discord master switch
-- Maintenance queue และสถานะของแต่ละขั้นตอน
+  * Linux Docker
+  * Windows Host-native
+  * macOS Docker
+* เพิ่ม Windows Native SteamCMD installer
+* เพิ่ม Windows Host Agent สำหรับควบคุม `PalServer.exe`
+* เพิ่ม Dashboard Export/Import แบบเลือกจุดประสงค์
+* รองรับการย้าย World ข้าม Windows, Linux และ macOS
+* เปลี่ยน Linux Docker storage ไปใช้ Docker Named Volume
+* ปรับ Resource optimization และ Docker log rotation
+* ปิด Python log formatter ที่ไม่จำเป็น
+* เพิ่มระบบตรวจสอบ Windows path เพื่อป้องกัน Save ล้มเหลว
+* ลดคำสั่ง Windows เหลือ 6 ไฟล์ โดยรวม System Check ไว้ใน Start All และใช้ Setup สำหรับ Update
+* Restart หลังแก้ Config รองรับกำหนดเวลาเริ่มงานและเวลารอแจ้งผู้เล่น พร้อม Countdown แบบ Shutdown Server
+* ปรับ README และเอกสารเชิงลึกใหม่ทั้งหมด
+* เพิ่ม Import progress แบบแสดงขั้นตอน เปอร์เซ็นต์ เวลารอ และสถานะ REST API
+* เพิ่ม Import compatibility guard ป้องกัน Full restore ข้ามระบบปฏิบัติการ
+* เพิ่มการเลือก World ID และแก้ `DedicatedServerName` อัตโนมัติเมื่อย้าย World
+* เพิ่ม Automatic rollback และ Startup recovery เมื่อ Import หรือการเปิด Server ล้มเหลว
 
 ---
 
-## สิ่งที่เพิ่มจาก 1.0.0
+# 🔄 Summary of Changes: 1.0.0 → 1.1.0
 
-### Runtime และสคริปต์
+## 1. Multi-runtime Architecture
 
-เพิ่มไฟล์และเครื่องมือใหม่:
+### เวอร์ชัน 1.0.0
+
+Palworld Server และ Dashboard ทำงานผ่าน Docker เป็นหลัก:
 
 ```text
-.env.host.example
-docker-compose.host.yml
-run/linux/
-run/windows/
-run/macos/
+Docker
+├─ Palworld Server
+├─ Dashboard
+└─ Docker Proxy
 ```
 
-#### Linux
+### เวอร์ชัน 1.1.0
 
-- `first-init.sh`
-- `start-all.sh`
-- `stop-all.sh`
-- `migrate-to-named-volume.sh`
+รองรับหลายรูปแบบตามระบบปฏิบัติการ:
 
-#### Windows
+```text
+Linux
+└─ Palworld Server + Dashboard ผ่าน Docker
 
-- `00-Setup.bat`
-- `01-Start-All.bat`
-- `02-Start-Server.bat`
-- `03-Start-Dashboard.bat`
-- `04-Status.bat`
-- `05-Logs.bat`
-- `06-Update.bat`
-- `07-Stop-All.bat`
-- `08-Doctor.bat`
-- `09-Move-Server-To-Short-Path.bat`
-- `PalworldManager.ps1`
-- `PalworldHostAgent.ps1`
-- `Configure-PalworldHost.ps1`
+Windows
+├─ PalServer.exe รันบน Windows โดยตรง
+├─ PowerShell Host Agent
+└─ Dashboard รันผ่าน Docker
 
-#### macOS
+macOS
+└─ Palworld Linux Server + Dashboard ผ่าน Docker Desktop
+```
 
-เพิ่มชุดคำสั่ง `.command` สำหรับ Setup, Start, Stop, Status, Logs, Update และ Doctor โดยไม่ต้องจำคำสั่ง Compose เอง
-
-### เอกสาร
-
-เพิ่มและเขียนใหม่:
-
-- `README.md`
-- `FULL_GUIDE_TH.md`
-- `CONFIG-REFERENCE-TH.md`
-- `ARCHITECTURE-TH.md`
-- `TROUBLESHOOTING-TH.md`
-- `WINDOWS-HOST-MODE-TH.md`
-- `MIGRATE-TO-NAMED-VOLUME-TH.md`
-- `DASHBOARD-MAINTENANCE.md`
-- `CHANGELOG.md`
-- `VERSION`
+Windows Host-native mode ถูกเพิ่มขึ้นเพื่อหลีกเลี่ยงปัญหาประสิทธิภาพและพฤติกรรมของ Palworld Linux Server ที่รันผ่าน Docker Desktop/WSL2
 
 ---
 
-## สิ่งที่เปลี่ยน
+## 2. Windows Host-native Mode
 
-### ค่าเริ่มต้นของ Linux Docker mode
+เพิ่มระบบรัน Palworld Dedicated Server บน Windows โดยตรง:
 
-| รายการ | 1.0.0 | 1.1.0 |
-|---|---|---|
-| Storage | `./palworld` Bind mount | Named Volume `palworld-data` |
-| Update ตอน Start | เปิด | ปิดเป็นค่าเริ่มต้น |
-| Performance arguments | `MULTITHREADING=true` | `ENABLE_PERF_THREADING_ARGS=true` |
-| Worker threads | ตามค่าที่กำหนด | เว้นว่างให้เกมเลือกเอง |
-| Player logging | เปิด | ปิดเป็นค่าเริ่มต้น |
-| Python log filter | เปิด | ปิดเป็นค่าเริ่มต้น |
-| Auto reboot | เปิด | ปิดเป็นค่าเริ่มต้น |
-| Discord notification | เปิดหลายรายการ | ปิดผ่าน Master switch เป็นค่าเริ่มต้น |
-| Dashboard refresh | 15 วินาที | 30 วินาที |
-| Engine/Network baseline | 120 | 60 |
-| Palworld RAM | ไม่มี Reservation | Soft reservation ค่าเริ่มต้น 8 GB |
-| Dashboard/Proxy | ไม่มี Resource limit | มี CPU/RAM/PID limits |
-| Container logs | ไม่มีขนาดสูงสุดชัดเจน | Docker local log rotation |
-
-### Dashboard และ Docker Proxy เป็น `admin` profile
-
-ใน `1.1.0` คำสั่งนี้เปิดเฉพาะ Palworld:
-
-```bash
-docker compose up -d
+```text
+PalServer.exe
 ```
 
-เมื่อต้องการเปิด Dashboard ด้วย ต้องใช้:
+โดยไม่ต้องรันตัวเกมอยู่ใน Linux container
 
-```bash
-docker compose --profile admin up -d --build
+### ฟีเจอร์ที่เพิ่ม
+
+* ดาวน์โหลดและอัปเดต Dedicated Server ผ่าน Native Windows SteamCMD
+* สร้าง `PalWorldSettings.ini` อัตโนมัติ
+* เปิด REST API และ RCON อัตโนมัติ
+* ตั้ง Admin password ผ่าน `.env.host`
+* Start/Stop/Restart Server จาก Dashboard
+* รองรับ Export/Import และ Safety Backup
+* รองรับ Host path ทั้งแบบ relative และ absolute
+* เก็บ Host Agent log สำหรับตรวจสอบปัญหา
+
+### คำสั่ง Windows
+
+```text
+run\windows\00-Setup.bat
+run\windows\01-Start-All.bat
+run\windows\02-Start-Server.bat
+run\windows\03-Start-Dashboard.bat
+run\windows\04-Stop-All.bat
+run\windows\05-Move-Server-To-Short-Path.bat
 ```
 
-หรือใช้สคริปต์:
-
-```bash
-./run/linux/start-all.sh
-```
-
-### การสร้าง Config
-
-Docker mode รองรับการหยุดสร้าง `PalWorldSettings.ini` จาก Environment เพื่อให้ Dashboard แก้ Config แล้วไม่ถูกเขียนทับ:
-
-```dotenv
-PALWORLD_DISABLE_GENERATE_SETTINGS=true
-```
-
-สำหรับการติดตั้งใหม่ ให้เริ่มด้วย `false` จน Server สร้าง Config สำเร็จครั้งแรก จากนั้นจึงเปลี่ยนเป็น `true`
+- `00-Setup.bat` ใช้ทั้งติดตั้งครั้งแรกและ Update/Validate ผ่าน SteamCMD โดยหยุด Component เดิมก่อนและไม่เปิดกลับอัตโนมัติ
+- `01-Start-All.bat` รวม System Check เดิมของ Doctor และเปิด Dashboard ที่เคยถูก Stop ให้กลับมาทำงาน
+- `03-Start-Dashboard.bat` เปิด Host Agent ให้อัตโนมัติ
+- `04-Stop-All.bat` Save World, REST Shutdown 1 วินาที, REST `/stop` และ taskkill fallback, ปิด Agent/Dashboard และตรวจผลหลังปิด
+- แก้ HTTP 400 ระหว่าง `00-Setup.bat`/`04-Stop-All.bat` โดยไม่ส่ง `waittime=0` ไปยัง Palworld REST API
 
 ---
 
-## Operational breaking changes
+## 3. Native Windows SteamCMD
 
-แม้ `1.1.0` เป็น Minor release แต่มีการเปลี่ยนวิธีใช้งานที่ผู้ดูแลเดิมต้องทราบ
+เวอร์ชันก่อนหน้าใช้ Linux SteamCMD container เป็นหลัก
 
-### 1. ห้ามเปิด 1.1.0 แล้วคาดว่าจะเห็น World เดิมทันที
+ในเวอร์ชัน 1.1.0 ระบบ Windows เปลี่ยนมาใช้:
 
-เวอร์ชันใหม่ใช้ Named Volume แต่ `1.0.0` เก็บข้อมูลใน `./palworld`
-
-ต้องย้ายข้อมูลก่อน:
-
-```bash
-./run/linux/migrate-to-named-volume.sh ./palworld
+```text
+steamcmd.exe
 ```
 
-สคริปต์จะ:
+บน Windows โดยตรง
 
-1. หยุด Compose stack
-2. สร้าง Backup แบบ `.tar.gz`
-3. สร้าง Named Volume
-4. ตรวจว่า Volume ปลายทางว่าง
-5. คัดลอกข้อมูลเดิมเข้า Volume
+ไฟล์ SteamCMD จะถูกจัดเก็บไว้ที่:
 
-ห้ามลบ `./palworld` เดิมจนกว่าจะเข้า World และตรวจข้อมูลครบแล้ว
-
-### 2. Dashboard ไม่เปิดด้วยคำสั่งปกติ
-
-เนื่องจาก Dashboard และ Docker Proxy อยู่ใน `admin` profile จึงต้องระบุ Profile หรือใช้สคริปต์ Start all
-
-### 3. `UPDATE_ON_BOOT` ไม่เปิดตลอดเวลาแล้ว
-
-First init หรือรอบ Update ต้องเปิดชั่วคราว:
-
-```dotenv
-PALWORLD_UPDATE_ON_BOOT=true
+```text
+runtime/steamcmd-windows/
 ```
 
-หลังติดตั้งหรืออัปเดตเสร็จให้เปลี่ยนกลับเป็น:
+และติดตั้ง Palworld Dedicated Server ด้วย App ID:
 
-```dotenv
-PALWORLD_UPDATE_ON_BOOT=false
+```text
+2394010
 ```
 
-### 4. Discord และ Player logging ถูกปิดเป็นค่าเริ่มต้น
+ระบบรองรับ:
 
-ผู้ใช้ที่ต้องการ Notification เดิมต้องเปิด Master switch และตรวจ Webhook URL ใหม่
+* ดาวน์โหลด SteamCMD อัตโนมัติ
+* Retry เมื่อ SteamCMD รอบแรกยังไม่พร้อม
+* ตรวจว่ามี `PalServer.exe` หลังติดตั้ง
+* Update และ Validate ผ่านสคริปต์ Windows
 
-### 5. Engine baseline ลดจาก 120 เป็น 60
+---
 
-รุ่นนี้ลด Frame/Tick baseline เพื่อลดภาระ Server และ Background scheduling ค่าเหล่านี้ยังแก้ได้ใน `docker-compose.yml`
+## 4. Windows Save Path Protection
 
-### 6. Windows ต้องใช้ Path สั้น
-
-แนะนำ:
-
-```dotenv
-PALWORLD_HOST_DIR=D:/PalServer
-```
-
-ไม่แนะนำให้วาง Server ไว้ในโฟลเดอร์โปรเจกต์ที่ซ้อนหลายชั้น เพราะ Palworld จะต่อ Path สำหรับ World backup และ Player save เพิ่มอีกหลายระดับ ซึ่งอาจทำให้ Save ล้มเหลวด้วยข้อความ:
+Palworld บน Windows อาจ Save ไม่สำเร็จเมื่อเส้นทางติดตั้งยาวเกินไป เช่น:
 
 ```text
 Failed to save. Failed copy from backup.
 ```
 
-ใช้เครื่องมือย้าย:
+เวอร์ชัน 1.1.0 เพิ่ม:
+
+* การตรวจความยาว Path ก่อน Start
+* คำเตือนเมื่อ Path มีความเสี่ยง
+* ตรวจสิทธิ์เขียนไฟล์
+* สคริปต์ย้าย Server ไป Path สั้น
+* รองรับตำแหน่งแนะนำ เช่น:
 
 ```text
-run\windows\09-Move-Server-To-Short-Path.bat
+D:/PalServer
+```
+
+คำสั่งย้ายข้อมูล:
+
+```text
+run\windows\05-Move-Server-To-Short-Path.bat
+```
+
+สคริปต์จะคัดลอก Server และ World ไปยังตำแหน่งใหม่โดยไม่ลบข้อมูลต้นฉบับทันที
+
+---
+
+## 5. Safer Export and Import
+
+ระบบ Export ยังคงสร้าง **Full archive** เพื่อให้ไฟล์เดียวใช้ได้ทั้งสำหรับ Backup และการย้าย World:
+
+```text
+Pal/Saved/
+```
+
+ไฟล์ Export ประกอบด้วย `SaveGames`, `Config`, `Logs`, `Crashes` และ Manifest สำหรับตรวจสอบความเข้ากันได้ตอน Import
+
+เมื่อ Import ผู้ใช้ต้องเลือกจุดประสงค์ให้ตรงกับงานที่ต้องการ
+
+### 5.1 ย้าย World และผู้เล่นข้าม Server — แนะนำ
+
+นำเข้าเฉพาะ:
+
+```text
+Pal/Saved/SaveGames/
+```
+
+เหมาะสำหรับ:
+
+* ย้าย World จาก Windows ไป Linux/macOS
+* ย้าย World จาก Linux/macOS ไป Windows
+* ย้าย Server ไปเครื่องใหม่
+* สลับ Runtime แต่เล่น World และตัวละครเดิมต่อ
+* เก็บ Config, REST API, RCON และ Admin password ของเครื่องปลายทางไว้
+
+ข้อมูลที่ย้ายประกอบด้วย:
+
+* World และ Progress
+* ตัวละครผู้เล่น
+* Guild
+* Pals
+* สิ่งปลูกสร้าง
+* กล่องและไอเทม
+
+ก่อน Import ระบบจะค้นหา World ID ที่มี `Level.sav` และตรวจจำนวน Player save จาก ZIP จากนั้นจะ:
+
+1. แทนที่ `Pal/Saved/SaveGames`
+2. แก้ `DedicatedServerName` ใน `GameUserSettings.ini` ของปลายทางให้ตรงกับ World ID ที่นำเข้า
+3. เปิด Server ใหม่อัตโนมัติ
+4. รอ REST API กลับมาพร้อม
+5. ตรวจว่า World folder และ `DedicatedServerName` ตรงกับ World ที่นำเข้าจริง
+6. ประกาศงานสำเร็จเมื่อการตรวจสอบผ่านเท่านั้น
+
+การแก้ `DedicatedServerName` อัตโนมัติช่วยป้องกันกรณี Import สำเร็จแต่ Server เปิด World เดิมหรือ World ใหม่ จนผู้เล่นถูกขอให้สร้างตัวละครใหม่
+
+### 5.2 กู้คืน Backup เต็มระบบ
+
+แทนที่ทั้งหมด:
+
+```text
+Pal/Saved/
+```
+
+เหมาะสำหรับ:
+
+* Disaster recovery
+* กู้คืน Server เดิมจาก Backup
+* ย้อน World และ Config กลับพร้อมกัน
+* กู้ข้อมูลหลัง Save หรือ Config เสียหาย
+
+Full restore ต้องใช้ Backup จากระบบประเภทเดียวกับปลายทาง:
+
+| ปลายทาง | ZIP ต้องมี |
+|---|---|
+| Windows Host-native | `Pal/Saved/Config/WindowsServer/` |
+| Linux/macOS Docker | `Pal/Saved/Config/LinuxServer/` |
+
+Dashboard จะปฏิเสธ Full restore ข้ามระบบ **ก่อนหยุด Server** หาก Config ไม่ตรงกับปลายทางหรือ Manifest ระบุ source platform คนละประเภท
+
+ตัวอย่างที่ถูกบล็อก:
+
+```text
+Linux backup → Full restore บน Windows
+Windows backup → Full restore บน Linux/macOS
+```
+
+กรณีดังกล่าวให้เลือก **ย้าย World และผู้เล่นข้าม Server** แทน
+
+### 5.3 กู้คืนเฉพาะการตั้งค่า Server
+
+Windows:
+
+```text
+Pal/Saved/Config/WindowsServer/
+```
+
+Linux/macOS:
+
+```text
+Pal/Saved/Config/LinuxServer/
+```
+
+เหมาะสำหรับ:
+
+* แก้ `PalWorldSettings.ini` ผิด
+* REST API หรือ RCON ใช้งานไม่ได้
+* Admin password ไม่ตรง
+* ต้องการย้อน Config โดยไม่ย้อน World และผู้เล่น
+
+ZIP ต้องมี Config ที่ตรงกับ Runtime ปลายทาง มิฉะนั้น Dashboard จะไม่อนุญาตให้เริ่มงาน
+
+### 5.4 Import Progress และสถานะงาน
+
+หน้า Maintenance แสดงข้อมูลระหว่าง Import แบบต่อเนื่อง:
+
+* ขั้นตอนปัจจุบันภาษาไทย
+* เปอร์เซ็นต์ความคืบหน้า
+* รายละเอียดสิ่งที่กำลังทำ
+* เวลาที่ใช้และเวลาที่อัปเดตล่าสุด
+* Runtime status
+* REST API error ล่าสุด
+* World ID ที่นำเข้าและ World ID ที่เปิดใช้งาน
+* จำนวน Player save
+* ตำแหน่ง Safety Backup
+* ผลการ Rollback หรือ Startup recovery
+
+ตัวอย่างขั้นตอน:
+
+```text
+ตรวจสอบ ZIP
+→ Save World ปัจจุบัน
+→ หยุด Server
+→ สร้าง Safety Backup
+→ แตกไฟล์ไปยัง Staging
+→ แทนที่ข้อมูลตามโหมด
+→ เลือก World ID ที่นำเข้า
+→ Start Server
+→ รอ REST API
+→ ตรวจ World ที่เปิดใช้งาน
+→ เสร็จสมบูรณ์
+```
+
+### 5.5 Import Safety, Rollback และ Startup Recovery
+
+ก่อน Import ทุกครั้ง ระบบจะ:
+
+1. ตรวจ path traversal, absolute path, symlink, ZIP integrity, จำนวนไฟล์ และขนาดข้อมูล
+2. ตรวจว่า ZIP รองรับ Import mode ที่เลือก
+3. Save World ปัจจุบัน
+4. หยุด Server
+5. สร้าง Full Safety Backup
+6. เก็บข้อมูลเดิมใน Rollback path
+7. Import ผ่าน Staging directory
+8. เปิด Server ใหม่อัตโนมัติ
+9. รอ REST API และตรวจ World ที่เปิดใช้งาน
+
+หาก Import หรือการเปิด Server ล้มเหลว ระบบจะ:
+
+```text
+หยุด Server
+→ เก็บข้อมูล Import ที่ล้มเหลว
+→ คืน Save/Config เดิมจาก Rollback
+→ คืน DedicatedServerName เดิมเมื่อเป็น World-only import
+→ เปิด Server เดิมกลับ
+→ รอ REST API
+→ บันทึกผลการกู้คืนใน Job
+```
+
+หาก Dashboard ถูก Restart ระหว่าง Import ระบบจะตรวจ Job ที่ค้างและไฟล์ Rollback ตอนเริ่มทำงาน แล้วพยายามคืนข้อมูลเดิมและเปิด Server กลับโดยอัตโนมัติ
+
+> ห้ามเปิด Server สองตัวพร้อมกันโดยใช้ World ชุดเดียวกัน
+
+Workflow สำหรับสลับ Server ที่แนะนำ:
+
+```text
+Server A: Save และ Export
+→ ปิด Server A
+→ Server B: Import แบบย้าย World และผู้เล่น
+→ รอ Job ขึ้น Completed และตรวจ World ID
+→ เข้าเกมทดสอบตัวละครเดิม
 ```
 
 ---
 
-## วิธีอัปเกรดจาก 1.0.0 บน Linux
+## 6. Config Restart Countdown
 
-### 1. Save และหยุด Server เดิม
+หน้า Config แยกคำสั่งเป็น **ล้างค่าร่าง**, **อัปเดตไฟล์** และ **Restart Server** อย่างชัดเจน ปุ่มอัปเดตไฟล์จะสร้าง Backup และเขียน `PalWorldSettings.ini` โดยไม่ Restart ส่วนปุ่ม Restart จะไม่เขียนค่าร่างและใช้ Config ที่บันทึกในไฟล์ล่าสุด ผู้ใช้กำหนดเวลาเริ่มงานและเวลารอแจ้งผู้เล่นได้ ระบบเรียก Palworld REST `POST /shutdown` พร้อม `waittime` และข้อความที่กำหนด
 
-แนะนำให้ Save World จาก Dashboard ก่อน แล้วจึงหยุด Stack:
-
-```bash
-docker compose down
-```
-
-### 2. สำรองข้อมูล
-
-อย่างน้อยต้องสำรอง:
+Workflow:
 
 ```text
-.env
-palworld/
-dashboard/data/
+ผู้ใช้กดอัปเดตไฟล์เพื่อเขียน Config และสร้าง Backup
+→ ผู้ใช้กด Restart Server แยกต่างหาก
+→ รอเวลาเริ่มงาน (ถ้ามี)
+→ แจ้งผู้เล่นและนับถอยหลัง
+→ Save/Stop Runtime
+→ Start Server ใหม่
+→ รอ REST API พร้อม
+→ Completed
 ```
 
-ตัวอย่าง:
+หน้า Maintenance แสดงเวลาที่เหลือและเปอร์เซ็นต์แบบสด ค่าเริ่มต้นคือเริ่มทันทีและแจ้งล่วงหน้า 60 วินาที หาก Dashboard ถูกรีสตาร์ตกลาง Countdown ระบบ Startup recovery จะรอคำสั่ง Shutdown เดิมและเปิด Server กลับอัตโนมัติ
 
-```bash
-tar -czf palworld-1.0.0-before-upgrade.tar.gz palworld dashboard/data .env
+---
+
+## 7. Docker Named Volume
+
+Linux และ macOS Docker mode เปลี่ยนจาก Bind mount:
+
+```yaml
+volumes:
+  - ./palworld:/palworld
 ```
 
-### 3. แตก 1.1.0 เป็นโฟลเดอร์ใหม่
+เป็น Docker Named Volume:
 
-ไม่แนะนำให้แตกทับโฟลเดอร์เดิมทันที เพื่อให้ Rollback ได้ง่าย
+```yaml
+volumes:
+  - palworld-data:/palworld
+```
 
-### 4. ย้ายค่า Secret
+ข้อดี:
 
-คัดลอกค่าจาก `.env` เดิมไปยัง `.env` ใหม่แบบเลือกเฉพาะค่า ไม่ควรทับ `.env.example` รุ่นใหม่ทั้งไฟล์
+* ลดการอ่านเขียนข้าม Windows/macOS shared filesystem
+* ลด I/O overhead
+* เหมาะกับ Palworld Save และไฟล์จำนวนมาก
+* ลดปัญหาจาก Docker Desktop bind mount
+* สามารถ Backup และ Restore ผ่าน Dashboard ได้
 
-ตรวจอย่างน้อย:
+มีเอกสารและสคริปต์สำหรับ:
+
+* Migration
+* Verification
+* Backup
+* Restore
+* Rollback
+
+---
+
+## 8. Resource Optimization
+
+เพิ่มและปรับ Resource configuration สำหรับแต่ละ Service
+
+### Palworld Server
+
+* ไม่มี Hard CPU limit เป็นค่าเริ่มต้น
+* ไม่มี Hard memory limit ที่อาจทำให้ Server ถูก Kill
+* ใช้ Soft memory reservation
+* ลดการเกิด CPU throttling
+* ปรับ Engine และ Network settings ให้อยู่ในระดับสมดุล
+
+### Dashboard และ Docker Proxy
+
+รองรับการกำหนด:
 
 ```dotenv
-PALWORLD_SERVER_PASSWORD=
-PALWORLD_ADMIN_PASSWORD=
-DASHBOARD_USERNAME=
-DASHBOARD_PASSWORD=
-DISCORD_INFORMATION_WEBHOOK_URL=
+DASHBOARD_CPU_LIMIT=
+DASHBOARD_MEMORY_LIMIT=
+DOCKER_PROXY_CPU_LIMIT=
+DOCKER_PROXY_MEMORY_LIMIT=
 ```
 
-### 5. ย้าย World ไป Named Volume
+เพิ่ม:
 
-นำโฟลเดอร์ `palworld` เดิมมาไว้ข้างแพ็กเกจใหม่ แล้วรัน:
+* Memory reservation
+* PID limit
+* Docker local logging driver
+* Log rotation
+* จำกัดขนาดและจำนวน Log files
 
-```bash
-chmod +x run/linux/*.sh
-./run/linux/migrate-to-named-volume.sh ./palworld
-```
+---
 
-### 6. ตรวจค่า First init
+## 9. Logging Improvements
 
-สำหรับ Server เดิมที่มี Config อยู่แล้ว:
+ปิด Python log formatter เป็นค่าเริ่มต้น:
 
 ```dotenv
-PALWORLD_UPDATE_ON_BOOT=false
+LOG_FILTER_ENABLED=false
+```
+
+ทำให้ Palworld ส่ง Log เข้า Docker logging driver โดยตรง
+
+ลด Process เสริม:
+
+```text
+python3 /home/steam/server/pal_logger.py
+```
+
+และลด Runtime overhead ที่ไม่จำเป็น
+
+---
+
+## 10. Background Services
+
+ปรับค่าเริ่มต้นเพื่อให้ Server ทำงานเบาลงและคาดเดาได้ง่ายขึ้น
+
+ฟังก์ชันที่ไม่จำเป็นจะถูกปิดเป็นค่าเริ่มต้น เช่น:
+
+```dotenv
+UPDATE_ON_BOOT=false
+AUTO_UPDATE_ENABLED=false
+AUTO_REBOOT_ENABLED=false
+ENABLE_PLAYER_LOGGING=false
+```
+
+GameData API, Discord notification, Backup cron และฟังก์ชันอื่นสามารถเปิดกลับผ่าน Config ได้ตามการใช้งาน
+
+REST API และ RCON ยังคงเปิดใช้สำหรับ Dashboard
+
+---
+
+## 11. Dashboard Runtime Control
+
+Dashboard รองรับ Runtime สองรูปแบบ
+
+### Docker Runtime
+
+ใช้ Docker Proxy เพื่อควบคุม:
+
+```text
+palworld-server container
+```
+
+### External Windows Runtime
+
+ใช้ PowerShell Host Agent เพื่อควบคุม:
+
+```text
+PalServer.exe
+```
+
+Dashboard สามารถสั่ง:
+
+* Start
+* Stop
+* Restart
+* Save World
+* Announce
+* Kick
+* Ban
+* Unban
+* Export
+* Import
+* Config update
+
+ได้ทั้งสอง Runtime
+
+---
+
+## 12. Windows Host Agent
+
+เพิ่ม PowerShell Host Agent สำหรับเชื่อม Dashboard กับ PalServer.exe
+
+Host Agent ทำหน้าที่:
+
+* ตรวจสถานะ Server
+* Start และ Stop process
+* Restart หลังแก้ Config
+* หยุด Server ก่อน Import
+* เปิด Server กลับหลัง Import/Export
+* รายงานผลลัพธ์กลับ Dashboard
+* เก็บ Log สำหรับวิเคราะห์ปัญหา
+
+Log อยู่ที่:
+
+```text
+runtime/logs/host-agent.out.log
+runtime/logs/host-agent.err.log
+```
+
+---
+
+## 13. macOS Command Scripts
+
+เพิ่มชุดคำสั่งสำหรับ macOS:
+
+```text
+run/macos/00-Setup.command
+run/macos/01-Start-All.command
+run/macos/02-Start-Server.command
+run/macos/03-Start-Dashboard.command
+run/macos/04-Status.command
+run/macos/05-Logs.command
+run/macos/06-Update.command
+run/macos/07-Stop-All.command
+run/macos/08-Doctor.command
+```
+
+macOS ใช้ Palworld Linux Server ผ่าน Docker Desktop เนื่องจากไม่มี Palworld Dedicated Server native สำหรับ macOS
+
+---
+
+## 14. Integrated System Check
+
+Windows ย้าย Doctor มารวมใน:
+
+```text
+run\windows\01-Start-All.bat
+```
+
+Start All ตรวจ 10 ขั้นและ Start ระบบในรอบเดียว:
+
+* Required settings และรหัสผ่าน
+* Windows path length
+* Write permission
+* Docker Desktop และ Compose
+* Native SteamCMD
+* PalServer binary และ Config
+* Host Agent heartbeat
+* REST API readiness
+* Dashboard health
+* Dashboard → Windows REST connectivity
+
+macOS ยังคงมีคำสั่งตรวจระบบแยก:
+
+```bash
+./run/macos/08-Doctor.command
+```
+
+Windows จึงไม่มี `08-Doctor.bat` อีกต่อไป ลดกรณีผู้ใช้เปิด Doctor แล้วระบบถูก Start ซ้ำโดยไม่ตั้งใจ
+
+---
+
+## 15. Documentation Rewrite
+
+ปรับเอกสารทั้งหมดใหม่ โดยแบ่งเป็นระดับการใช้งานและระดับเชิงลึก
+
+### เอกสารหลัก
+
+```text
+README.md
+```
+
+ครอบคลุม:
+
+* เลือกโหมด
+* Setup
+* Start/Stop
+* Config
+* Backup
+* Import/Export
+* Update
+* Troubleshooting
+
+### เอกสารเชิงลึก
+
+```text
+FULL_GUIDE_TH.md
+CONFIG-REFERENCE-TH.md
+GAME-CONFIG-REFERENCE-TH.md
+ARCHITECTURE-TH.md
+WINDOWS-HOST-MODE-TH.md
+MIGRATE-TO-NAMED-VOLUME-TH.md
+SAVE-TRANSFER-TH.md
+DASHBOARD-MAINTENANCE.md
+TROUBLESHOOTING-TH.md
+RELEASE-1.1.0.md
+CHANGELOG.md
+```
+
+---
+
+# ⚠️ Operational Breaking Changes
+
+แม้เวอร์ชันนี้ใช้หมายเลข Minor release แต่มีการเปลี่ยนวิธีใช้งานบางส่วนจาก 1.0.0
+
+## Named Volume
+
+Linux/macOS Docker mode ใช้ Named Volume เป็นค่าเริ่มต้น
+
+ข้อมูลเดิมใน:
+
+```text
+./palworld
+```
+
+จะไม่ถูกใช้อัตโนมัติ จนกว่าจะ Migration เข้า Volume ใหม่
+
+ห้ามเปิด Server ก่อนตรวจว่าข้อมูล World ถูกย้ายสำเร็จแล้ว เพราะอาจทำให้เห็น World ใหม่
+
+## Admin Profile
+
+Dashboard และ Docker Proxy อาจอยู่ภายใต้ Compose profile:
+
+```text
+admin
+```
+
+เปิด Server อย่างเดียว:
+
+```bash
+docker compose up -d palworld
+```
+
+เปิด Server พร้อม Dashboard:
+
+```bash
+docker compose --profile admin up -d
+```
+
+## Windows Directory
+
+Windows Host-native mode แนะนำให้ใช้ Path สั้น:
+
+```text
+D:/PalServer
+```
+
+ไม่ควรวาง Dedicated Server ไว้ภายใน Project directory ที่ซ้อนหลายชั้น
+
+## Config Precedence
+
+ใน Docker mode ค่า Environment อาจสร้างหรือเขียนทับ `PalWorldSettings.ini`
+
+เมื่อเริ่มใช้ Dashboard แก้ Config โดยตรง ควรตรวจค่า:
+
+```dotenv
 PALWORLD_DISABLE_GENERATE_SETTINGS=true
 ```
 
-### 7. เปิดระบบ
-
-```bash
-./run/linux/start-all.sh
-```
-
-หรือ:
-
-```bash
-docker compose --profile admin up -d --build
-```
-
-### 8. ตรวจหลังอัปเกรด
-
-```bash
-docker compose --profile admin ps
-docker compose logs --tail=200 palworld
-docker compose --profile admin logs --tail=200 dashboard
-```
-
-ตรวจให้ครบ:
-
-- เข้า World เดิมได้
-- Player save อยู่ครบ
-- Dashboard Online
-- REST API Online
-- Export สำเร็จ
-- Config เปิดอ่านได้
-
-เก็บ Backup และโฟลเดอร์ `1.0.0` เดิมไว้จนผ่านการทดสอบจริง
+เพื่อป้องกัน Config ถูกสร้างทับเมื่อ Recreate container
 
 ---
 
-## วิธีเริ่มใช้งานใหม่
+# ⬆️ Upgrade Guide from 1.0.0
 
-### Linux
+## ก่อนอัปเกรด
 
-```bash
-cp .env.example .env
-# แก้รหัสผ่านใน .env
-chmod +x run/linux/*.sh
-./run/linux/first-init.sh
-# เปลี่ยน PALWORLD_UPDATE_ON_BOOT=false หลังติดตั้ง
-./run/linux/start-all.sh
-```
+1. เข้า Dashboard
+2. กด Save World
+3. Export Backup
+4. ปิด Server
+5. สำรอง `.env`
+6. สำรองโฟลเดอร์ `palworld`
+7. เก็บ ZIP Backup ไว้นอก Project directory
 
-### Windows
+## Linux/macOS Docker
 
-แนะนำให้แตกโปรเจกต์ไว้ที่ใดก็ได้ แต่เก็บเกมจริงใน Path สั้น เช่น `D:/PalServer`
+1. แตกแพ็กเกจ 1.1.0 ไปยังโฟลเดอร์ใหม่
+2. คัดลอกค่าที่จำเป็นจาก `.env`
+3. Migration ข้อมูลเดิมเข้า Named Volume
+4. ตรวจ World และ Player files
+5. เปิด Server
+6. เปิด Dashboard ด้วย `admin` profile
+7. ตรวจ REST API และ World ก่อนอนุญาตให้ผู้เล่นเข้า
+
+## Windows
+
+1. แตกแพ็กเกจไปยังโฟลเดอร์ใหม่
+2. รัน:
 
 ```text
 run\windows\00-Setup.bat
-run\windows\01-Start-All.bat
-run\windows\08-Doctor.bat
 ```
 
-### macOS
-
-```bash
-chmod +x run/macos/*.command
-./run/macos/00-Setup.command
-./run/macos/01-Start-All.command
-```
-
----
-
-## ข้อควรรู้สำหรับ Windows
-
-### SteamCMD อาจไม่สำเร็จในรอบแรก
-
-จากการทดสอบจริง Native SteamCMD อาจตอบ:
+3. ใช้ Server path สั้น เช่น:
 
 ```text
-ERROR! Failed to install app '2394010' (Missing configuration)
+D:/PalServer
 ```
 
-แล้วสำเร็จในรอบ Retry ถัดไป ตัว Manager รองรับ Retry อัตโนมัติ หากครบจำนวนรอบแล้วยังไม่สำเร็จ ให้รัน `06-Update.bat` หรือ `00-Setup.bat` อีกครั้งหลังตรวจการเชื่อมต่อ Steam
+4. Import World ด้วยโหมด:
 
-### Setup ไม่ได้เปิด Server
+```text
+ย้าย World ไปเครื่องนี้
+```
 
-หลัง `00-Setup.bat` สำเร็จ ต้องรัน:
+5. เปิดระบบ:
 
 ```text
 run\windows\01-Start-All.bat
 ```
 
-### Export/Import ต้องใช้ Host Agent
+6. `01-Start-All.bat` จะตรวจระบบครบก่อนประกาศว่า Server พร้อมใช้งาน
 
-Windows Dashboard ต้องมี Host Agent ทำงานเพื่อหยุดและเปิด `PalServer.exe` ระหว่าง Maintenance workflow
+---
 
-ตรวจด้วย:
+# 🛡️ Backup Recommendations
+
+ก่อนดำเนินการต่อไปนี้ควร Export Backup ทุกครั้ง:
+
+* Upgrade version
+* เปลี่ยน Runtime
+* ย้าย Windows ↔ Linux
+* แก้ Config จำนวนมาก
+* Update Palworld Server
+* Migration Named Volume
+* Import Save
+* เปลี่ยน World
+
+แนะนำให้มี Backup อย่างน้อย:
 
 ```text
-run\windows\04-Status.bat
-run\windows\08-Doctor.bat
+Daily backup
+Pre-update backup
+Pre-import backup
+Off-machine backup
 ```
 
-### REST API Password ต้องตรงกัน
+---
 
-ค่าเหล่านี้ต้องสัมพันธ์กัน:
+# ⚠️ Known Limitations
+
+* Windows, Linux และ macOS ห้ามเปิด World เดียวกันพร้อมกัน
+* macOS ไม่มี Native Palworld Dedicated Server
+* Docker Desktop อาจมี I/O และ virtualization overhead
+* Full restore ข้ามระบบปฏิบัติการถูกบล็อกโดย Dashboard; ให้ใช้โหมด “ย้าย World และผู้เล่นข้าม Server”
+* SteamCMD อาจต้อง Retry หลังอัปเดตตัวเองรอบแรก
+* Windows Server path ที่ยาวเกินไปอาจทำให้ Save และ Backup ล้มเหลว
+* Resource optimization ช่วยลด Overhead แต่ไม่รับประกันว่าปัญหา Physics หรือ Network correction ของ Palworld จะหายทั้งหมด
+
+---
+
+## 🛠️ Final Fixes Included Before Official Release
+
+ก่อนเผยแพร่ `v1.1.0` ได้รวมการแก้ไขต่อไปนี้ไว้ในแพ็กเกจหลักแล้ว:
+
+* แก้ Job Import ค้างที่ `starting_server` เมื่อ Full restore ZIP จาก Linux ไปยัง Windows หรือข้ามระบบในลักษณะเดียวกัน
+* เพิ่มการตรวจ Config platform และปฏิเสธ Full restore ที่ไม่เข้ากันก่อนหยุด Server
+* แก้ Import แบบ World-only ที่ไฟล์ผู้เล่นอยู่ครบ แต่ Server เปิด World ผิดเพราะ `DedicatedServerName` ยังชี้ไปยัง World เดิม
+* เพิ่มการหา World ID จาก `Level.sav` และ Patch `DedicatedServerName` อัตโนมัติ
+* เพิ่มการตรวจ World ID หลังเปิด Server ไม่ใช้ REST API พร้อมเพียงอย่างเดียวเป็นเกณฑ์สำเร็จ
+* เพิ่ม Progress, Stage detail, elapsed time, REST status และ Safety Backup ในประวัติงาน
+* เพิ่ม Automatic rollback เมื่อ Import หรือการเปิด Server ล้มเหลว
+* เพิ่ม Startup recovery เมื่อ Dashboard ถูก Restart ระหว่าง Import
+* Import สำเร็จแล้ว Start Server ใหม่อัตโนมัติ และ Job จะขึ้น `completed` เมื่อ Server พร้อมและเปิด World ที่นำเข้าถูกต้อง
+
+---
+
+## ⚠️ License Update / ประกาศสำคัญเรื่องสัญญาอนุญาต
+
+* **[TH]** โปรเจกต์นี้ใช้ **Custom Non-Commercial License** สำหรับโค้ดภาษาไทย Dashboard สคริปต์ เครื่องมือ และส่วนดัดแปลงที่พัฒนาเพิ่ม ไม่อนุญาตให้นำส่วนดังกล่าวไปขายต่อ ใช้ให้บริการ Hosting แบบเก็บค่าบริการ หรือนำไปใช้งานเชิงพาณิชย์โดยไม่ได้รับอนุญาต
+* **[EN]** The Thai localization, Dashboard modifications, helper scripts, documentation, and other custom additions are distributed under a **Custom Non-Commercial License**. Commercial hosting, resale, paid redistribution, or commercial exploitation of the modified components is prohibited without permission.
+* โค้ดหรือ Component จากโครงการต้นฉบับยังคงอยู่ภายใต้ License ของเจ้าของเดิม
+
+---
+
+## 🙏 Credits
+
+Special thanks to **@thijsvanloef** and the contributors of:
 
 ```text
-PALWORLD_ADMIN_PASSWORD
-AdminPassword ใน PalWorldSettings.ini
-รหัสที่ Dashboard ใช้เรียก REST API
+thijsvanloef/palworld-server-docker
 ```
 
----
+for providing the original Palworld Docker server foundation.
 
-## ข้อจำกัดและ Known issues
-
-- macOS ไม่มี Native Palworld Dedicated Server ในแพ็กเกจนี้ จึงใช้ Linux container ผ่าน Docker Desktop
-- Docker Desktop มี Storage/VM overhead มากกว่า Docker Engine บน Linux host จริง
-- Windows ควรใช้ Path สั้นเพื่อป้องกัน Save backup path ยาวเกินไป
-- ห้ามให้ Docker Palworld และ Windows Native Palworld เขียน World เดียวกันพร้อมกัน
-- Import จะหยุด Runtime ชั่วคราวและสร้าง Safety backup ก่อนดำเนินการ
-- Import มี 3 scope: `world_only` (ค่าเริ่มต้น), `full_restore` และ `config_only`; การสลับ Windows/Linux/macOS ควรใช้ `world_only`
-- `PALWORLD_ADMIN_PASSWORD` ที่ไม่ตรงกับ Config จะทำให้ Dashboard แสดง REST API Offline หรือ Unauthorized
-- Dashboard และ Docker Proxy ไม่เปิดโดยอัตโนมัติเมื่อไม่ระบุ `admin` profile
-- Resource values เป็นค่าเริ่มต้นทั่วไป ควรปรับตามจำนวนผู้เล่น, World size และ RAM จริง
+ขอขอบคุณผู้พัฒนาโครงการต้นฉบับและผู้มีส่วนร่วมทุกท่าน ที่สร้างพื้นฐานระบบ Palworld Docker Server ซึ่งถูกนำมาต่อยอดในโครงการนี้
 
 ---
 
-## ความเข้ากันได้
-
-| รายการ | สถานะ |
-|---|---|
-| อัปเกรด World จาก 1.0.0 | รองรับเมื่อทำ Migration ไป Named Volume |
-| Dashboard data เดิม | คัดลอก `dashboard/data` ได้ |
-| Linux Docker host | รองรับ |
-| Windows Native PalServer | รองรับใน 1.1.0 |
-| Windows Docker PalServer | ยังใช้ Docker mode ได้ แต่แนะนำ Host-native สำหรับเครื่อง Windows |
-| macOS Native PalServer | ไม่รองรับ |
-| macOS Docker Desktop | รองรับสำหรับการทดลองและใช้งานทั่วไป |
-| Export จาก 1.0.0 แล้ว Import เข้า 1.1.0 | รองรับเมื่อ ZIP ผ่าน Validation และมี `Pal/Saved` ถูกต้อง |
-
----
-
-## Security และการดูแลระบบ
-
-- ไม่ควร Commit `.env`, `.env.host`, Password หรือ Discord Webhook
-- ไม่ควรเปิด REST API `8212` และ RCON `25575` สู่ Internet โดยตรง
-- Dashboard และ Docker Proxy มี Resource/PID limits
-- Docker Proxy จำกัด Docker API ที่ Dashboard ใช้งาน
-- Container logs ใช้ Rotation ลดความเสี่ยง Disk เต็ม
-- Import ตรวจ ZIP path traversal, symlink, ขนาดไฟล์, โครงสร้าง และความพร้อมของ path ตามโหมดก่อน Extract
-- Dashboard สร้าง Full safety backup ก่อน Import และ Rollback เฉพาะ target ที่ถูกแทนที่เมื่อ Workflow ล้มเหลว
-- Export format ยังคงเป็น Full `Pal/Saved` archive แต่ผู้ใช้เลือก restore scope ตอน Import ได้
-
----
-
-## Pre-release checklist
-
-ก่อนสร้าง Tag ให้ตรวจอย่างน้อย:
-
-- [ ] `VERSION` เป็น `1.1.0`
-- [ ] ชื่อใน `README.md`, `CHANGELOG.md` และหน้า Dashboard เป็น `1.1.0`
-- [ ] ไม่มี `.env`, `.env.host`, Save, Password หรือ Webhook จริงใน Release asset
-- [ ] ไม่มี `__pycache__`, `.pyc`, Runtime log และไฟล์ Import/Export ส่วนตัว
-- [ ] `docker compose config` ผ่าน
-- [ ] `docker compose --profile admin config` ผ่าน
-- [ ] Linux First init ผ่าน
-- [ ] Linux Migration จาก Bind mount ไป Named Volume ผ่าน
-- [ ] Windows `00-Setup.bat` ติดตั้ง Native Server สำเร็จ
-- [ ] Windows `01-Start-All.bat` เปิด Server, Agent และ Dashboard สำเร็จ
-- [ ] Windows Save World ผ่านเมื่อใช้ Path สั้น
-- [ ] macOS Setup/Start scripts ทำงานบน Docker Desktop
-- [ ] REST API, Players, Metrics และ Settings Online
-- [ ] Export และ Import ผ่านทั้ง Docker runtime และ Windows external runtime
-- [ ] ZIP Release แตกไฟล์ได้และ Checksum ตรง
-
----
-
-## Release assets ที่แนะนำ
+## 📦 Release Information
 
 ```text
-palworld-server-dashboard-thai-1.1.0.zip
-palworld-server-dashboard-thai-1.1.0.zip.sha256
-RELEASE-1.1.0.md
+Version: 1.1.0
+Previous version: 1.0.0
+Release type: Minor version / Major operational update
+Supported modes:
+- Linux Docker
+- Windows Host-native
+- macOS Docker
 ```
 
-ไม่แนะนำให้แนบไฟล์ `.patch` เป็น Asset หลักสำหรับผู้ใช้ทั่วไป แต่สามารถเก็บไว้สำหรับ Maintainer ได้
+### Release assets
 
----
+```text
+palworld-server-dashboard-thai-1.1.0-final.zip
+palworld-server-dashboard-thai-1.1.0-final.zip.sha256
+```
 
-## คำสั่งสร้าง Tag
+SHA-256:
 
-แนะนำ Tag แบบมี `v` นำหน้า:
+```text
+ดูค่าจริงจากไฟล์ `palworld-server-dashboard-thai-1.1.0-final.zip.sha256`
+```
+
+Recommended Git tag:
 
 ```bash
 git tag -a v1.1.0 -m "Palworld Server Dashboard Thai 1.1.0"
 git push origin v1.1.0
 ```
 
-หาก Repository ใช้ Tag แบบไม่มี `v`:
 
-```bash
-git tag -a 1.1.0 -m "Palworld Server Dashboard Thai 1.1.0"
-git push origin 1.1.0
-```
+### สถานะค่าร่าง ค่าในไฟล์ และค่าที่ Server ใช้อยู่
 
----
+หน้า Config แยกสถานะเป็น 3 ชั้นเพื่อป้องกันความสับสน:
 
-## Release description แบบย่อ
+- **Server ใช้อยู่**: ค่าจาก REST `GET /settings` ของ Process ที่กำลังรัน
+- **ในไฟล์**: ค่าที่อ่านจาก `PalWorldSettings.ini` และจะถูกโหลดเมื่อ Restart
+- **ค่าร่าง**: ค่าที่แก้ในหน้าเว็บแต่ยังไม่ได้กด **อัปเดตไฟล์**
 
-Palworld Server Dashboard Thai `1.1.0` เพิ่มการรองรับ Linux Docker, Windows Host-native และ macOS Docker ในแพ็กเกจเดียว พร้อม Named Volume, Native Windows SteamCMD, PowerShell Host Agent, Config editor, Runtime control, Export/Import workflow, Resource optimization, Log rotation และเอกสารภาษาไทยฉบับสมบูรณ์
+หลังอัปเดตไฟล์สำเร็จ ค่าจะถูกย้ายออกจากรายการร่างและแสดงในคอลัมน์ **ในไฟล์ — รอ Restart** ปุ่ม Restart จะเตือนเฉพาะค่าร่างที่ยังไม่ได้เขียน ไม่เตือนค่าที่บันทึกลงไฟล์แล้ว
 
-ผู้ใช้งาน `1.0.0` บน Linux ต้องย้ายข้อมูลจาก `./palworld` ไปยัง Named Volume ก่อนเปิดรุ่นใหม่ และต้องใช้ `--profile admin` เมื่อต้องการเปิด Dashboard ส่วน Windows แนะนำให้ติดตั้งตัวเกมไว้ใน Path สั้น เช่น `D:/PalServer`
+เมื่อเริ่ม Restart ระบบจะล็อกสำเนา `PalWorldSettings.ini` ล่าสุดไว้ก่อน จากนั้นแจ้งผู้เล่นและหยุด Server ให้สนิท แล้วเขียนสำเนาที่ล็อกไว้กลับลงไฟล์อีกครั้งก่อนเปิด Server วิธีนี้ป้องกันกรณี Process เดิมเขียนค่า Runtime เก่าทับไฟล์ระหว่าง Shutdown หลัง REST API พร้อม ระบบจะอ่าน `GET /settings` และตรวจเฉพาะค่าที่รอ Restart หากค่าไม่ตรง Job จะเป็น `failed` พร้อมระบุค่าที่ไม่ตรง แทนการขึ้น `completed` ผิด ๆ
 
----
-
-## Import Recovery และ Maintenance Progress ที่รวมใน 1.1.0
-
-ก่อนเผยแพร่ `v1.1.0` ได้รวมการแก้ปัญหา Import แบบ Full restore ค้างที่ `starting_server` ไว้ในรุ่นนี้แล้ว โดยเฉพาะกรณีนำ Backup จากระบบหนึ่งไป Full restore บนอีกระบบ เช่น Linux backup ไปยัง Windows
-
-### Import compatibility guard
-
-- ตรวจ Config platform ใน ZIP ก่อนหยุด Server
-- Windows Full restore ต้องมี `Pal/Saved/Config/WindowsServer`
-- Linux/macOS Full restore ต้องมี `Pal/Saved/Config/LinuxServer`
-- หาก Manifest ระบุ source platform คนละระบบ จะไม่อนุญาต Full restore
-- การย้ายข้ามระบบต้องใช้โหมด `world_only`
-- UI ปิดตัวเลือกที่ ZIP ไม่รองรับและแสดงคำเตือนทันที
-
-### Maintenance progress
-
-- แสดงชื่อ Stage ภาษาไทย
-- แสดงรายละเอียดว่าระบบกำลังทำอะไร
-- แสดงเปอร์เซ็นต์ความคืบหน้า
-- แสดงเวลาที่ใช้และเวลาอัปเดตล่าสุด
-- ระหว่างรอ REST API แสดง Runtime status, REST error ล่าสุด และเวลาที่เหลือ
-- หน้า Maintenance refresh ทุก 2 วินาที
-
-### Server restart, rollback และ recovery
-
-- Import สำเร็จแล้ว Start Server ใหม่อัตโนมัติ
-- Job จะ Completed ต่อเมื่อ REST API พร้อม
-- หาก Start ไม่สำเร็จ ระบบหยุด Runtime, คืนข้อมูลเดิม และ Start Server เดิมกลับ
-- แสดง Rollback stages ใน Dashboard
-- เพิ่ม Startup recovery กรณี Dashboard ถูก Restart ระหว่าง Import
-
-### การเลือก Import mode
-
-| สถานการณ์ | โหมด |
-|---|---|
-| Windows ↔ Linux/macOS | `world_only` |
-| ย้ายไปเครื่องใหม่แต่เก็บ Config ปลายทาง | `world_only` |
-| กู้ Backup กลับระบบเดิมทั้งหมด | `full_restore` |
-| กู้เฉพาะ Config ของระบบเดียวกัน | `config_only` |
-
-
-
-### World selection verification
-
-- `world_only` อ่าน World ID ที่ active จาก ZIP
-- Patch `DedicatedServerName` ใน `GameUserSettings.ini` ของปลายทางอัตโนมัติ
-- แสดง World ID และจำนวน Player save ในหน้า Import/Job
-- ตรวจ World ID และ `Level.sav` หลัง Start ก่อนประกาศสำเร็จ
-- Rollback ค่า `DedicatedServerName` พร้อม SaveGames เมื่อ Import ล้มเหลว
+เมื่อการตรวจผ่าน หน้า Config จะโหลดทั้ง `GET /settings` และไฟล์ใหม่อัตโนมัติ สถานะ **อัปเดตไฟล์แล้ว — รอ Restart** และตารางค่าที่รอใช้จะหายทันทีโดยไม่ต้อง Refresh หน้า นอกจากนี้ `DenyTechnologyList=` และ `DenyTechnologyList=()` จะถูกตีความเป็นรายการว่าง `[]` เหมือนกับ REST API จึงไม่แสดงเป็นความต่างปลอม

@@ -71,10 +71,10 @@ Linux/macOS Docker  -> Pal/Saved/Config/LinuxServer
 1. ตรวจว่า Server B ยังปิดอยู่
 2. ที่ Server A กด Export และรอจน Runtime เปิดกลับ/Job completed
 3. ดาวน์โหลด ZIP
-4. ปิด Server A หลัง Save World
-5. ที่ Server B อัปโหลด ZIP
+4. ปิด Server A หลัง Save World; Windows ใช้ `04-Stop-All.bat` หรือ Stop Runtime จาก Dashboard
+5. ที่ Server B เปิดด้วย `01-Start-All.bat` เพื่อให้ Server/Agent/Dashboard ผ่าน System Check แล้วอัปโหลด ZIP
 6. เลือก `สลับ/ย้าย World และผู้เล่น`
-7. กด Import และรอ Job completed
+7. กด Import และรอ Job completed ระบบจะ Start Server กลับอัตโนมัติ
 8. ตรวจ World GUID, ตัวละคร, Guild และสิ่งปลูกสร้าง
 9. ห้ามเปิด Server A และ B พร้อมกันโดยใช้ World ชุดเดียวกัน
 

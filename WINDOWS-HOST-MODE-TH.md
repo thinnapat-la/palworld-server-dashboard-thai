@@ -32,7 +32,7 @@ Manager คำนวณ projected path ของ Player backup และ:
 ย้ายของเดิม:
 
 ```text
-run\windows\09-Move-Server-To-Short-Path.bat
+run\windows\05-Move-Server-To-Short-Path.bat
 ```
 
 สคริปต์:
@@ -91,11 +91,13 @@ runtime/config-backups/
 
 ---
 
-## 4. Start flow
+## 4. Start flow และ System Check
 
 ```text
 run\windows\01-Start-All.bat
 ```
+
+คำสั่งนี้แทนทั้ง Start All และ Doctor เดิม โดยตรวจ 10 ขั้นก่อนประกาศว่าระบบพร้อม: Credentials, Path, Write permission, Docker, SteamCMD, Server files/Config, Host Agent heartbeat, REST API, Dashboard health และ Dashboard-to-Host REST connectivity
 
 ### Host Agent
 
@@ -148,22 +150,28 @@ http://host.docker.internal:<REST_PORT>/v1/api/info
 
 ---
 
-## 5. คำสั่งและผลกระทบ
+## 5. คำสั่งสำหรับผู้ใช้
 
-| คำสั่ง | Server | Agent | Dashboard |
-|---|---:|---:|---:|
-| `00-Setup.bat` | ไม่เปิด | ไม่เปิด | ไม่เปิด |
-| `01-Start-All.bat` | เปิด | เปิด | เปิด |
-| `02-Start-Server.bat` | เปิด | เปิด | ไม่เปลี่ยน |
-| `03-Start-Dashboard.bat` | ไม่เปลี่ยน | ไม่จำเป็นสำหรับอ่าน REST แต่จำเป็นกับ lifecycle | เปิด |
-| `04-Status.bat` | ตรวจ | ตรวจ | ตรวจ |
-| `05-Logs.bat` | อ่าน log | อ่าน log | ไม่ติดตาม Docker log |
-| `06-Update.bat` | หยุด/Update/เปิด | เปิด | ไม่เปลี่ยน |
-| `07-Stop-All.bat` | หยุด | หยุด | down |
-| `08-Doctor.bat` | อาจ Start เพื่อทดสอบ | เปิด | เปิด |
-| `09-Move...bat` | หยุด | หยุด | down |
+มีเพียง 6 ไฟล์:
 
-> Doctor เป็น active test และอาจเปิด Server/Dashboard หากยังไม่ทำงาน
+| คำสั่ง | Server | Agent | Dashboard | ใช้เมื่อ |
+|---|---:|---:|---:|---|
+| `00-Setup.bat` | หยุดถ้ากำลังรัน | หยุด | Down | ติดตั้งครั้งแรกหรือ Update/Validate เกม |
+| `01-Start-All.bat` | เปิด | เปิด | เปิด | ใช้งานปกติและตรวจระบบครบทุกครั้งที่กลับมาเปิด |
+| `02-Start-Server.bat` | เปิด | เปิด | ไม่เปลี่ยน | ต้องการรันเกมโดยไม่เปิด Dashboard |
+| `03-Start-Dashboard.bat` | ไม่เปลี่ยน | เปิด | เปิด | เปิดหน้าเว็บและ Agent แม้ Container เคยถูก Stop |
+| `04-Stop-All.bat` | Save/Shutdown/หยุด | หยุด | Stop + Down | ปิดทุก Component และตรวจผลหลังปิด |
+| `05-Move-Server-To-Short-Path.bat` | หยุด | หยุด | Down | แก้ปัญหา Path ยาวหรือ Save/Backup copy fail |
+
+การ Update ใช้ลำดับ:
+
+```text
+04-Stop-All.bat
+00-Setup.bat
+01-Start-All.bat
+```
+
+`00-Setup.bat` เรียก SteamCMD `app_update 2394010 validate` อยู่แล้ว จึงไม่ต้องมี Update script แยก
 
 ---
 
@@ -233,7 +241,7 @@ Invoke-WebRequest http://127.0.0.1:8212/v1/api/info -Headers @{Authorization="Ba
 docker compose --env-file .env.host -f docker-compose.host.yml --profile host-admin exec -T dashboard-host python3 -c "import urllib.request; print(urllib.request.urlopen('http://host.docker.internal:8212').status)"
 ```
 
-คำสั่งตัวอย่างข้างบนไม่ใส่ Auth จึงอาจตอบ 401 ซึ่งยังยืนยันว่า network path ถึงแล้ว; Doctor ทดสอบพร้อม Auth ให้ครบ
+คำสั่งตัวอย่างข้างบนไม่ใส่ Auth จึงอาจตอบ 401 ซึ่งยังยืนยันว่า network path ถึงแล้ว; `01-Start-All.bat` ทดสอบพร้อม Auth ให้ครบ
 
 VPN, Antivirus และ Endpoint Security อาจบล็อก `host.docker.internal` หรือ vEthernet interface
 
@@ -274,7 +282,20 @@ announce -> save -> REST shutdown -> agent stop -> operation -> agent start -> w
 
 ### Direct script
 
-`07-Stop-All.bat` ส่ง stop ไป Agent โดยตรง Agent รอ process ออกและ fallback เป็น `taskkill` เมื่อ timeout จึงควร Save World ก่อนเมื่อมีผู้เล่น
+`04-Stop-All.bat` ทำงานตามลำดับ:
+
+```text
+Save World ผ่าน REST
+→ REST Shutdown 1 วินาที
+→ REST `/stop` fallback เมื่อ `/shutdown` ถูกปฏิเสธ
+→ รอ process ออก
+→ Host Agent/taskkill fallback
+→ หยุด Agent
+→ Stop/Down Dashboard
+→ ตรวจว่าไม่มี Component เหลือทำงาน
+```
+
+หากมีผู้เล่นและต้องการแจ้งล่วงหน้า ให้สร้าง Shutdown/Maintenance job จาก Dashboard ก่อน
 
 ---
 
@@ -295,7 +316,7 @@ Failed to save. Failed copy from backup.
 5. File lock จาก backup/sync software
 6. `Pal/Saved/SaveGames` ถูก Read-only หรือไม่
 
-Doctor ตรวจ path และ temporary write แต่ไม่สามารถยืนยันทุก file lock ระหว่างเกมทำงานได้
+`01-Start-All.bat` ตรวจ path และ temporary write แต่ไม่สามารถยืนยันทุก file lock ระหว่างเกมทำงานได้
 
 ---
 
@@ -303,10 +324,10 @@ Doctor ตรวจ path และ temporary write แต่ไม่สาม�
 
 ### Script เปิดแล้วปิด
 
-รันจาก CMD:
+รันจาก CMD เพื่อให้เห็น Error:
 
 ```bat
-run\windows\08-Doctor.bat
+run\windows\01-Start-All.bat
 ```
 
 ทุก `.bat` เรียก `_Run-Manager.bat` ซึ่ง pause เมื่อ exit code ไม่เป็น 0
@@ -328,7 +349,7 @@ del /q runtime\control\request-*.json runtime\control\response-*.json runtime\co
 ### Host REST Online แต่ Dashboard Offline
 
 - ตรวจ `PALWORLD_HOST_API_HOST=host.docker.internal`
-- รัน Doctor
+- รัน `01-Start-All.bat` เพื่อทดสอบทั้งระบบ
 - ตรวจ Windows Firewall/EDR
 - Recreate dashboard-host
 

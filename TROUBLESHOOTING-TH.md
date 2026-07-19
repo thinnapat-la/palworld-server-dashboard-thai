@@ -23,9 +23,10 @@ ss -lntp | grep ':8080'
 ### Windows
 
 ```text
-run\windows\04-Status.bat
-run\windows\08-Doctor.bat
+run\windows\01-Start-All.bat
 ```
+
+คำสั่งนี้เปิด Server, Agent และ Dashboard พร้อม System Check ครบทุกจุด หากต้องการดูสถานะโดยไม่ Start เพิ่ม ใช้:
 
 ```bat
 docker compose --env-file .env.host -f docker-compose.host.yml --profile host-admin ps
@@ -51,7 +52,7 @@ Invoke-RestMethod http://127.0.0.1:8212/v1/api/info -Headers @{Authorization="Ba
 ```
 
 - Host test fail: Config/password/server problem
-- Host test pass แต่ Doctor step 9 fail: Firewall/VPN/EDR/host.docker.internal
+- Host test pass แต่ Start-All ขั้น Dashboard-to-Host REST fail: Firewall/VPN/EDR/host.docker.internal
 
 ### Docker mode
 
@@ -74,7 +75,7 @@ docker compose --profile admin exec dashboard python3 -c "import urllib.request;
 - ตรวจ Antivirus ไม่ block `steamcmd.exe`
 - ลอง `PALWORLD_STEAMCMD_VALIDATE=false`
 - ลบ `runtime/steamcmd-windows/appcache` ไม่ใช่ Host directory
-- รัน `06-Update.bat`
+- ปิดด้วย `04-Stop-All.bat` แล้วรัน `00-Setup.bat` เพื่อ Update/Validate ใหม่
 
 ห้ามลบ `D:/PalServer/Pal/Saved`
 
@@ -85,8 +86,10 @@ docker compose --profile admin exec dashboard python3 -c "import urllib.request;
 สคริปต์รุ่นนี้ pause เมื่อ error หากยังปิด ให้เปิด CMD ใน root แล้วรัน:
 
 ```bat
-run\windows\08-Doctor.bat
+run\windows\01-Start-All.bat
 ```
+
+Start-All รวม System Check เดิมของ Doctor ไว้แล้ว
 
 ดู:
 
@@ -114,8 +117,8 @@ PALWORLD_HOST_DIR=D:/PalServer
 รัน:
 
 ```text
-run\windows\09-Move-Server-To-Short-Path.bat
-run\windows\08-Doctor.bat
+run\windows\05-Move-Server-To-Short-Path.bat
+run\windows\01-Start-All.bat
 ```
 
 ตรวจ Disk/ACL:
@@ -129,7 +132,31 @@ icacls D:\PalServer
 
 ---
 
-## 6. Host Agent Offline
+## HTTP 400 ตอนรัน 00-Setup.bat หรือ 04-Stop-All.bat
+
+หากพบข้อความ `REST shutdown ... (400) Bad Request` ในแพ็กเกจเก่า สาเหตุคือสคริปต์ส่ง `waittime=0` ไปยัง `POST /v1/api/shutdown` ซึ่ง Palworld 1.0 บางรุ่นไม่ยอมรับ รุ่น Final นี้เปลี่ยนเป็น `waittime=1` และมี fallback ตามลำดับ: Save World → `/shutdown` → `/stop` → Host Agent → `taskkill` จึงไม่ควรค้างรอ Timeout เพียงเพราะ `/shutdown` ตอบ 400
+
+## 6. Stop-All ดูเหมือนไม่ทำงาน
+
+ใช้ไฟล์ใหม่:
+
+```text
+run\windows\04-Stop-All.bat
+```
+
+ระบบจะ Save World, ส่ง REST Shutdown โดยใช้ `waittime=1`, ลอง REST `/stop` หาก Shutdown ถูกปฏิเสธ, รอ process, ใช้ `taskkill` เป็น fallback, หยุด Host Agent และ Down Dashboard จากนั้นตรวจซ้ำทุก Component หากค้างให้ดูข้อความในหน้าต่างและตรวจ:
+
+```bat
+tasklist | findstr /I PalServer
+type runtime\logs\host-agent.err.log
+docker ps --filter name=palworld-dashboard-host
+```
+
+หากมีผู้เล่น ให้ใช้ Shutdown/Maintenance ใน Dashboard เพื่อแจ้งล่วงหน้าก่อนเรียก Stop-All
+
+---
+
+## 7. Host Agent Offline
 
 ตรวจ PID/status:
 
@@ -277,7 +304,7 @@ Dashboard polling ไม่ใช่ต้นเหตุหลักหาก�
 
 ---
 
-## 13. Port conflict
+## 14. Port conflict
 
 Windows:
 
@@ -298,7 +325,7 @@ ss -lntp | grep -E ':8212|:8080'
 
 ---
 
-## 14. ก่อนขอความช่วยเหลือ
+## 15. ก่อนขอความช่วยเหลือ
 
 เก็บข้อมูลนี้:
 
@@ -306,7 +333,7 @@ ss -lntp | grep -E ':8212|:8080'
 - โหมดใช้งาน
 - `.env` ที่ลบรหัส/Webhook แล้ว
 - `docker compose config` ที่ลบ secret แล้ว
-- Status/Doctor output
+- Output จาก `01-Start-All.bat` หรือสถานะใน Dashboard
 - Log 100-300 บรรทัดก่อน error
 - ขนาด World และพื้นที่ว่าง
 - ขั้นตอนที่ทำให้เกิดซ้ำ

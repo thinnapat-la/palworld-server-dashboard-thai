@@ -2,7 +2,7 @@
 
 เอกสารนี้ใช้เมื่ออัปเกรดจากรุ่นที่ mount `./palworld:/palworld` ไปใช้ Named Volume `palworld-data`
 
-> Windows Host-native mode ไม่ใช้ขั้นตอนนี้ เพราะ World อยู่ใน `PALWORLD_HOST_DIR`
+> Windows Host-native mode ไม่ใช้ขั้นตอนนี้ เพราะ World อยู่ใน `PALWORLD_HOST_DIR`; หาก Path ยาวให้ใช้ `run\windows\05-Move-Server-To-Short-Path.bat`
 
 ---
 
